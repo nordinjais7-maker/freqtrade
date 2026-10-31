@@ -242,6 +242,39 @@ for many hours and sometimes days, well past the session they started in.
 Choosing "NY shorts only" from this table would be fitting to one year of data.
 Any variant that looks better must be checked on a different period before trusting it.
 
+### First variant sweep (same window, run on the Mac)
+
+| Variant | Trades | Win % | PF | Profit % | Max DD % | London PF | NY PF |
+|---|---|---|---|---|---|---|---|
+| baseline | 582 | 25.8 | 0.99 | −10.2 | 79.7 | 0.93 | 1.05 |
+| ny_only | 374 | 26.5 | 0.98 | −24.8 | 80.2 | – | 0.98 |
+| london_only | 323 | 22.9 | 0.92 | −31.7 | 56.0 | 0.92 | – |
+| **trend_1h** | **191** | **29.3** | **1.22** | **+79.3** | **23.6** | **1.12** | **1.31** |
+| ny_only_trend | 119 | 29.4 | 1.10 | +25.2 | 24.2 | – | 1.10 |
+| min_rr_1.5 | 567 | 24.9 | 1.03 | +50.6 | 67.9 | 0.88 | 1.18 |
+| lookback_1 | 730 | 20.8 | 0.98 | −32.2 | 79.2 | 0.71 | 1.20 |
+| range_min_0.6 | 582 | 25.8 | 0.99 | −10.2 | 79.7 | 0.93 | 1.05 |
+| tp0.75_breakeven | 713 | 22.6 | 0.88 | −68.4 | 74.2 | 0.84 | 0.91 |
+| flat_at_17utc | 634 | 31.7 | 1.01 | +9.0 | 47.5 | 1.02 | 1.00 |
+
+What changed the picture:
+
+* **The 1h trend filter is the only clear improvement.** Profit factor rose from 0.99
+  to 1.22, drawdown fell from 80% to 24%, and *both* sessions turned positive.
+  It also has a mechanical reason: it stops fading sweeps that are really the
+  start of a trend move.
+* **"NY beats London" did not survive.** NY only made 374 trades versus 283 inside
+  the baseline, because with one open trade allowed, London trades were blocking
+  NY entries. Run alone, NY has PF 0.98. The baseline session split is confounded.
+* **`asia_range_min_pct` 0.6 changed nothing.** SUI's Asia range is almost always
+  wider than 0.6%, so the filter never bites. Values of 1.5 and 2.5 are now in the set.
+* **Tighter TP with break-even hurts**, and single-candle sweeps (`lookback_1`) hurt London.
+* **Flattening at 17:00 UTC** raises win rate and roughly halves drawdown, at no cost
+  to PF. It is worth combining with the trend filter.
+
+All of this is one year of one pair, so treat `trend_1h` as a hypothesis, not a
+result, until it holds on a different year.
+
 ## 5. Comparing variants in one go
 
 `user_data/scripts/sessionsweep_variants.py` runs a set of variants and prints one
@@ -251,27 +284,30 @@ compact table with the London / NY split. It needs data that is already download
 python user_data/scripts/sessionsweep_variants.py
 ```
 
-The default set is baseline, NY only, London only, 1h trend filter, NY only with
-trend filter, `min_rr` 1.5, `sweep_lookback` 1, `asia_range_min_pct` 0.6, a 0.75
-TP with break-even, and a 17:00 UTC flatten. It takes about ten minutes.
-Use `--only` to pick some, and `--timerange` to test another window.
+The full set has 16 variants and takes about 16 minutes. `--trend-set` runs only
+the six that matter for out-of-sample checking (baseline plus five trend-filter
+variants). Use `--only` to pick others, and `--timerange` to test another window.
 
 To check a winner out of sample, download the previous year and rerun on it:
 
 ```bash
 freqtrade download-data --config user_data/config_sessionsweep.json --userdir user_data \
-  --pairs "SUI/USDT:USDT" --timeframes 5m 1h --trading-mode futures --timerange 20241020-20251031
+  --pairs "SUI/USDT:USDT" --timeframes 5m 1h --trading-mode futures \
+  --timerange 20241020-20251031 --prepend
 ```
 
+`--prepend` is required because data for later dates already exists.
+
 ```bash
-python user_data/scripts/sessionsweep_variants.py --timerange 20241031-20251031
+python user_data/scripts/sessionsweep_variants.py --trend-set --timerange 20241031-20251031
 ```
 
 ## 6. Suggested next tests
 
-1. **Baseline, then isolate sessions.** Run the full 12 months, then
-   `trade_ny=false` and `trade_london=false` separately. Compare profit factor
-   and expectancy per tag; if one session is clearly negative, disable it.
+1. **Out-of-sample check of the trend filter** on 2024-10 to 2025-10 (section 5).
+   This decides whether any of the rest is worth pursuing.
+   When isolating sessions, remember that with one open trade the sessions
+   compete for the slot, so compare session-only runs, not the baseline split.
 2. **Sweep definition.** `sweep_lookback` 1 (classic single-candle rejection)
    vs 3 vs 6 vs 12; `sweep_min_pct` 0 vs 0.1 vs 0.25 to filter one-tick sweeps.
 3. **Range quality.** `asia_range_min_pct` 0.3 → 0.6 → 1.0. Tiny ranges tend to

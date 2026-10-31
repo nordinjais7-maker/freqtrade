@@ -39,10 +39,23 @@ VARIANTS: dict[str, dict] = {
     "ny_only_trend": {"buy": {"trade_london": False, "use_trend_filter": True}},
     "min_rr_1.5": {"buy": {"min_rr": 1.5}},
     "lookback_1": {"buy": {"sweep_lookback": 1}},
-    "range_min_0.6": {"buy": {"asia_range_min_pct": 0.6}},
+    "range_min_1.5": {"buy": {"asia_range_min_pct": 1.5}},
+    "range_min_2.5": {"buy": {"asia_range_min_pct": 2.5}},
     "tp0.75_breakeven": {"sell": {"tp_range_fraction": 0.75, "breakeven_at_midrange": True}},
     "flat_at_17utc": {"sell": {"exit_at_session_end": True}},
+    # Combinations built on the 1h trend filter, the best single change on 2025-26 data
+    "trend_rr1.5": {"buy": {"use_trend_filter": True, "min_rr": 1.5}},
+    "trend_flat17": {"buy": {"use_trend_filter": True}, "sell": {"exit_at_session_end": True}},
+    "trend_rr1.5_flat17": {
+        "buy": {"use_trend_filter": True, "min_rr": 1.5},
+        "sell": {"exit_at_session_end": True},
+    },
+    "trend_ema100": {"buy": {"use_trend_filter": True, "trend_ema_len": 100}},
+    "trend_ema20": {"buy": {"use_trend_filter": True, "trend_ema_len": 20}},
 }
+
+# The short list worth checking on a second, unseen year.
+TREND_SET = ["baseline", "trend_1h", "trend_rr1.5", "trend_flat17", "trend_ema20", "trend_ema100"]
 
 
 def default_timerange() -> str:
@@ -129,6 +142,7 @@ def main() -> None:
     )
     p.add_argument("--timerange", default=default_timerange())
     p.add_argument("--only", nargs="+", choices=list(VARIANTS), help="run only these variants")
+    p.add_argument("--trend-set", action="store_true", help="run only the trend-filter short list")
     args = p.parse_args()
 
     if not Path(CONFIG).is_file():
@@ -140,7 +154,7 @@ def main() -> None:
     if had_file:
         shutil.copy2(PARAM_FILE, backup)
 
-    names = args.only or list(VARIANTS)
+    names = args.only or (TREND_SET if args.trend_set else list(VARIANTS))
     rows: dict[str, dict] = {}
     try:
         for i, name in enumerate(names, 1):
