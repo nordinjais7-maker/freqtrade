@@ -32,11 +32,13 @@ freqtrade backtesting \
     --strategy SessionSweep \
     --timerange "${TIMERANGE}" \
     --breakdown month \
-    --export trades \
+    --cache none \
+    --export signals \
     --notes "SessionSweep baseline ${TIMERANGE}"
 
 echo ">>> 3/3 Session split (enter_tag = london_* / ny_*) and exit-reason breakdown"
 # Group 1 = per enter_tag, group 2 = per enter_tag + exit_reason.
+# Needs the "--export signals" used above.
 freqtrade backtesting-analysis \
     --config "${CONFIG}" --userdir user_data \
     --analysis-groups 1 2

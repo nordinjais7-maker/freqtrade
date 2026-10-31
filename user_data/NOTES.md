@@ -8,6 +8,7 @@ Session-timing liquidity-sweep strategy for Freqtrade, built for
 | `user_data/strategies/SessionSweep.py` | The strategy (all logic + parameters, heavily commented) |
 | `user_data/config_sessionsweep.json` | Futures / isolated / dry-run config, 1 open trade, **API keys are placeholders** |
 | `user_data/scripts/sessionsweep_backtest.sh` | Exact download + backtest + session-split commands for your Mac |
+| `user_data/scripts/sessionsweep_variants.py` | Runs a batch of parameter variants and prints one comparison table |
 | `user_data/scripts/sessionsweep_smoke_backtest.py` | Offline plumbing test on synthetic candles (no network needed) |
 | `user_data/NOTES.md` | This file |
 
@@ -66,8 +67,11 @@ All are Freqtrade strategy parameters. Override without editing code by creating
 `user_data/strategies/SessionSweep.json` (hyperopt output format), e.g.
 
 ```json
-{ "params": { "buy": { "sweep_lookback": 3, "use_trend_filter": true }, "sell": { "tp_range_fraction": 0.75 } } }
+{ "strategy_name": "SessionSweep",
+  "params": { "buy": { "sweep_lookback": 3, "use_trend_filter": true }, "sell": { "tp_range_fraction": 0.75 } } }
 ```
+
+The `strategy_name` field is required; without it Freqtrade refuses the file.
 
 Times are **minutes after 00:00 UTC** (420 = 07:00). Windows are `[start, end)`.
 
@@ -98,6 +102,8 @@ Class attributes you may also tune: `stoploss` (hard cap, −0.15),
 ## 3. Backtest status
 
 ### What happened in the build environment
+
+(The real result is in section 4.)
 
 Outbound connections to `api.binance.com`, `fapi.binance.com` and
 `data.binance.vision` were refused by the sandbox proxy, so **no real market
@@ -140,7 +146,7 @@ freqtrade download-data --config user_data/config_sessionsweep.json --userdir us
 ```bash
 freqtrade backtesting --config user_data/config_sessionsweep.json --userdir user_data \
   --strategy SessionSweep --timerange 20251031-20261031 \
-  --breakdown month --export trades --notes "SessionSweep baseline"
+  --breakdown month --cache none --export signals --notes "SessionSweep baseline"
 ```
 
 ```bash
@@ -161,7 +167,7 @@ Useful variants:
 
 ```bash
 # London only: write a parameter file next to the strategy, then backtest as usual
-echo '{"params": {"buy": {"trade_ny": false}}}' > user_data/strategies/SessionSweep.json
+echo '{"strategy_name": "SessionSweep", "params": {"buy": {"trade_ny": false}}}' > user_data/strategies/SessionSweep.json
 freqtrade backtesting --config user_data/config_sessionsweep.json --userdir user_data \
   --strategy SessionSweep --timerange 20251031-20261031
 ```
@@ -192,7 +198,76 @@ where no history exists).
 
 ---
 
-## 4. Suggested next tests
+## 4. Real baseline result (Binance, 2025-10-31 to 2026-10-31)
+
+Run on a Mac with the default parameters, 3x leverage, 1000 USDT, full balance per trade.
+SUI fell about 60% over this window.
+
+| Metric | Value |
+|---|---|
+| Trades | 582 (1 still open at the end) |
+| Win rate | 25.8% |
+| Profit factor | 0.99 |
+| Total profit | −10.2% |
+| Max drawdown | 79.7% (equity peaked at 3204 USDT in March 2026, then fell to 465) |
+| Longest losing streak | 21 |
+| Avg winner / avg loser (stake-relative) | +7.85% / −2.59% |
+
+| Session | Trades | Win rate | Net USDT | Profit factor (approx.) |
+|---|---|---|---|---|
+| London | 299 | 22.4% | −530 | 0.93 |
+| New York | 283 | 29.3% | +429 | 1.05 |
+
+| Entry tag | Trades | Win rate | Net USDT |
+|---|---|---|---|
+| ny_short | 138 | 33.3% | +717 |
+| london_short | 147 | 23.8% | −106 |
+| ny_long | 145 | 25.5% | −289 |
+| london_long | 152 | 21.1% | −424 |
+
+Every exit was either the take profit (150) or the stop (431). Trades often run
+for many hours and sometimes days, well past the session they started in.
+
+### What it means
+
+* **No edge yet.** Winners are 3× losers, but a 25.8% win rate exactly cancels that.
+  The p-value of the mean trade is 0.95, so the result is indistinguishable from noise.
+* **The drawdown is mostly sizing.** Each trade risks the full balance at 3x, so a
+  21-loss streak is brutal. Profit factor and win rate are the numbers to compare.
+* **Shorts won, longs lost, in a market down 60%.** That points at the 1h trend
+  filter, but it may simply reflect this one bearish year.
+* **New York beat London**, mainly through NY shorts. Early London sweeps are often
+  the start of the real move rather than a fake-out.
+
+Choosing "NY shorts only" from this table would be fitting to one year of data.
+Any variant that looks better must be checked on a different period before trusting it.
+
+## 5. Comparing variants in one go
+
+`user_data/scripts/sessionsweep_variants.py` runs a set of variants and prints one
+compact table with the London / NY split. It needs data that is already downloaded.
+
+```bash
+python user_data/scripts/sessionsweep_variants.py
+```
+
+The default set is baseline, NY only, London only, 1h trend filter, NY only with
+trend filter, `min_rr` 1.5, `sweep_lookback` 1, `asia_range_min_pct` 0.6, a 0.75
+TP with break-even, and a 17:00 UTC flatten. It takes about ten minutes.
+Use `--only` to pick some, and `--timerange` to test another window.
+
+To check a winner out of sample, download the previous year and rerun on it:
+
+```bash
+freqtrade download-data --config user_data/config_sessionsweep.json --userdir user_data \
+  --pairs "SUI/USDT:USDT" --timeframes 5m 1h --trading-mode futures --timerange 20241020-20251031
+```
+
+```bash
+python user_data/scripts/sessionsweep_variants.py --timerange 20241031-20251031
+```
+
+## 6. Suggested next tests
 
 1. **Baseline, then isolate sessions.** Run the full 12 months, then
    `trade_ny=false` and `trade_london=false` separately. Compare profit factor
