@@ -307,6 +307,7 @@ and decide the rule *before* looking at results. Reasonable candidates:
   If it fails there too, drop the idea.
 * Require a displacement candle after the reclaim, or a lower-timeframe break of
   structure, before entering. That changes what a "sweep" is, not how it is filtered.
+  (Implemented: see section 4b.)
 
 To run the BTC test (pass/fail rule fixed in advance: the **unchanged baseline**
 needs PF above about 1.15 on *both* years):
@@ -341,6 +342,42 @@ pairs but negative in 2025-26 on both, so it is not a stable effect either.
 Any new rule must be checked on both years, with PF above about 1.15 on each, before
 a dry run is worth the time.
 
+## 4b. Enhancements (structural changes, all off by default)
+
+After the four failed tests the strategy was extended with rule changes rather
+than more knob-tuning. Each one changes *what* a valid setup is, or how it is
+sized and managed, and each is off by default, so the default strategy still
+produces exactly the trades it did before (verified: identical trade list on the
+synthetic smoke data). Each was also verified on its own to do what it says.
+
+| Parameter | Default | Effect when on | Why it might help |
+|---|---|---|---|
+| `risk_per_trade_pct` | 0 | Size each trade so the stop loses this % of equity (`custom_stake_amount`) | Removes the 80–99% drawdowns; makes variants comparable |
+| `max_trades_per_session` | 0 | Only the first N sweeps per session per day (`confirm_trade_entry`) | The first sweep of a session is the classic setup; later ones are chop |
+| `require_mss` + `mss_lookback` | off / 6 | Reclaim candle must also close beyond the prior 6-candle swing low/high | Demands a market-structure shift, not just a close back inside |
+| `displacement_atr_mult` | 0 | Reclaim candle body ≥ N × ATR(14) in the trade direction | Filters weak, indecisive reclaims |
+| `entry_retrace_frac` + `entry_wait_candles` | 0 / 6 | Limit order part-way back toward the level; cancelled if unfilled | Better price and a tighter stop; misses runaway moves |
+| `max_asia_adr_ratio` | 0 | Asia range must be ≤ N × 14-day average daily range | Compressed Asia ranges tend to produce cleaner expansions |
+| `max_trade_hours` | 0 | Close trades older than N hours (`custom_exit`, reason `time_stop`) | Baseline trades ran for days; the thesis is intraday |
+
+Risk sizing changes stake, not signals, so its PF equals the baseline's (fees
+aside); compare drawdown instead. With 1% risk at 3x the stake is usually a
+fraction of the balance, so the config's "unlimited" stake is just the cap.
+
+### How to judge them
+
+Run every enhancement on both pairs and both years in one go (about 35 minutes):
+
+```bash
+python user_data/scripts/sessionsweep_variants.py --enhance-set --pair SUI/USDT:USDT BTC/USDT:USDT --timerange 20241031-20251031 20251031-20261031
+```
+
+The script ends with a profit-factor grid, one column per pair/year, and the
+minimum across columns. **The rule, fixed in advance: a variant counts only if its
+minimum PF across all four columns is above 1.10.** Picking the best single
+column would be the same mistake as before. The variants were chosen before any
+of these results were seen; do not add new ones after looking.
+
 ## 5. Comparing variants in one go
 
 `user_data/scripts/sessionsweep_variants.py` runs a set of variants and prints one
@@ -350,9 +387,11 @@ compact table with the London / NY split. It needs data that is already download
 python user_data/scripts/sessionsweep_variants.py
 ```
 
-The full set has 16 variants and takes about 16 minutes. `--trend-set` runs only
-the six that matter for out-of-sample checking (baseline plus five trend-filter
-variants). Use `--only` to pick others, and `--timerange` to test another window.
+The full set has 24 variants and takes about 24 minutes per pair/year. `--trend-set`
+runs the six trend-filter variants, `--enhance-set` the eight structural
+enhancements. `--pair` and `--timerange` accept several values; with more than one
+combination the script prints a profit-factor grid at the end. Use `--only` to pick
+specific variants.
 
 To check a winner out of sample, download the previous year and rerun on it:
 

@@ -15,6 +15,18 @@ Idea
 4. Take profit is the opposite side of the Asia range (configurable fraction),
    with an optional break-even move at mid-range and Freqtrade's native trailing stop.
 
+Enhancements (all OFF by default, so the defaults reproduce the original rules):
+  * risk_per_trade_pct      - size each trade so the stop loses a fixed % of equity
+  * max_trades_per_session  - trade only the first sweep(s) of each session
+  * require_mss             - after the reclaim, price must also break the recent
+                              swing low/high (market-structure shift)
+  * displacement_atr_mult   - the reclaim candle needs a strong body vs. ATR
+  * entry_retrace_frac      - enter with a limit order on a pull-back toward the
+                              swept level instead of at market
+  * max_asia_adr_ratio      - only trade days where the Asia range is compressed
+                              relative to the average daily range
+  * max_trade_hours         - close trades that have not resolved in N hours
+
 All session windows and thresholds are strategy parameters, so they can be
 overridden from `SessionSweep.json` next to this file, from the `strategy`
 section of the config, or via hyperopt.
@@ -28,7 +40,7 @@ Lookahead safety
   which shifts the 1h candle so only closed 1h candles are visible to a 5m candle.
 """
 
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import numpy as np
 import pandas as pd
@@ -154,6 +166,41 @@ class SessionSweep(IStrategy):
     trend_ema_len = IntParameter(10, 200, default=50, space="buy", optimize=False)
 
     # ------------------------------------------------------------------ #
+    # Parameters - enhancements (every default = OFF / original behaviour)
+    # ------------------------------------------------------------------ #
+    # Position sizing: % of total equity lost if the stop is hit. 0 = use the
+    # config stake_amount (original behaviour: whole balance per trade).
+    risk_per_trade_pct = DecimalParameter(
+        0.0, 5.0, default=0.0, decimals=2, space="buy", optimize=False
+    )
+    # Max entries per session per UTC day (London and NY counted separately).
+    # 0 = unlimited (original behaviour).
+    max_trades_per_session = IntParameter(0, 5, default=0, space="buy", optimize=False)
+    # Market-structure shift: the signal candle must close beyond the lowest low
+    # (short) / highest high (long) of the previous `mss_lookback` candles.
+    require_mss = BooleanParameter(default=False, space="buy", optimize=False)
+    mss_lookback = IntParameter(2, 24, default=6, space="buy", optimize=False)
+    # Displacement: signal candle body in the trade direction must be at least
+    # this many 5m ATR(14). 0 = off.
+    displacement_atr_mult = DecimalParameter(
+        0.0, 3.0, default=0.0, decimals=2, space="buy", optimize=False
+    )
+    # Retest entry: place a limit order this fraction of the way from the signal
+    # close back toward the swept Asia level (0 = enter at market, 1 = at the
+    # level). Unfilled orders are cancelled after `entry_wait_candles`.
+    entry_retrace_frac = DecimalParameter(
+        0.0, 1.0, default=0.0, decimals=2, space="buy", optimize=False
+    )
+    entry_wait_candles = IntParameter(1, 24, default=6, space="buy", optimize=False)
+    # Compression: Asia range must be <= this fraction of the 14-day average
+    # daily range (computed from previous days only). 0 = off.
+    max_asia_adr_ratio = DecimalParameter(
+        0.0, 2.0, default=0.0, decimals=2, space="buy", optimize=False
+    )
+    # Time stop: close a trade still open after this many hours. 0 = off.
+    max_trade_hours = IntParameter(0, 48, default=0, space="sell", optimize=False)
+
+    # ------------------------------------------------------------------ #
     # Parameters - leverage
     # ------------------------------------------------------------------ #
     leverage_level = DecimalParameter(
@@ -230,6 +277,31 @@ class SessionSweep(IStrategy):
         dataframe["sweep_high"] = post_asia_high.rolling(lb, min_periods=1).max()
         dataframe["sweep_low"] = post_asia_low.rolling(lb, min_periods=1).min()
 
+        # --- Enhancement inputs (all computed from past data only) ----------
+        # 5m ATR(14), Wilder smoothing, for the displacement filter.
+        prev_close = dataframe["close"].shift(1)
+        tr = pd.concat(
+            [
+                dataframe["high"] - dataframe["low"],
+                (dataframe["high"] - prev_close).abs(),
+                (dataframe["low"] - prev_close).abs(),
+            ],
+            axis=1,
+        ).max(axis=1)
+        dataframe["atr"] = tr.ewm(alpha=1 / 14, adjust=False).mean()
+
+        # Recent swing extremes for the market-structure-shift filter,
+        # excluding the current candle.
+        ml = int(self.mss_lookback.value)
+        dataframe["swing_low_prev"] = dataframe["low"].shift(1).rolling(ml).min()
+        dataframe["swing_high_prev"] = dataframe["high"].shift(1).rolling(ml).max()
+
+        # 14-day average daily range in % of price, using completed days only.
+        daily = dataframe.groupby(day).agg(d_high=("high", "max"), d_low=("low", "min"))
+        daily_range_pct = (daily["d_high"] - daily["d_low"]) / daily["d_low"] * 100
+        adr = daily_range_pct.shift(1).rolling(14, min_periods=5).mean()
+        dataframe["adr_pct"] = day.map(adr).to_numpy()
+
         return dataframe
 
     # ================================================================== #
@@ -266,6 +338,23 @@ class SessionSweep(IStrategy):
             & (dataframe["sweep_low"] < dataframe["asia_low"] / pen)
             & (dataframe["close"] > dataframe["asia_low"])
         )
+        # --- Enhancement filters that define a valid reclaim candle --------
+        # They are applied BEFORE edge detection, so the signal fires on the
+        # first candle that is both inside the reclaim state and confirmed.
+        if self.require_mss.value:
+            raw_short &= dataframe["close"] < dataframe["swing_low_prev"]
+            raw_long &= dataframe["close"] > dataframe["swing_high_prev"]
+        disp = float(self.displacement_atr_mult.value)
+        if disp > 0:
+            body = dataframe["close"] - dataframe["open"]
+            raw_short &= -body >= disp * dataframe["atr"]
+            raw_long &= body >= disp * dataframe["atr"]
+        adr_ratio = float(self.max_asia_adr_ratio.value)
+        if adr_ratio > 0:
+            compressed = dataframe["asia_range_pct"] <= adr_ratio * dataframe["adr_pct"]
+            raw_short &= compressed
+            raw_long &= compressed
+
         short_edge = raw_short & ~raw_short.shift(1, fill_value=False)
         long_edge = raw_long & ~raw_long.shift(1, fill_value=False)
 
@@ -276,10 +365,15 @@ class SessionSweep(IStrategy):
         short_tp = dataframe["asia_high"] - asia_range * tp_frac
         long_tp = dataframe["asia_low"] + asia_range * tp_frac
 
-        short_stop_dist = (short_stop - dataframe["close"]) / dataframe["close"] * 100
-        long_stop_dist = (dataframe["close"] - long_stop) / dataframe["close"] * 100
-        short_rr = (dataframe["close"] - short_tp) / (short_stop - dataframe["close"])
-        long_rr = (long_tp - dataframe["close"]) / (dataframe["close"] - long_stop)
+        # Planned entry: signal close, or a retest limit part-way back to the level.
+        frac = float(self.entry_retrace_frac.value)
+        short_entry = dataframe["close"] + frac * (dataframe["asia_high"] - dataframe["close"])
+        long_entry = dataframe["close"] - frac * (dataframe["close"] - dataframe["asia_low"])
+
+        short_stop_dist = (short_stop - short_entry) / short_entry * 100
+        long_stop_dist = (long_entry - long_stop) / long_entry * 100
+        short_rr = (short_entry - short_tp) / (short_stop - short_entry)
+        long_rr = (long_tp - long_entry) / (long_entry - long_stop)
 
         short_ok = short_edge & (short_stop_dist <= max_stop) & (short_stop_dist > 0)
         long_ok = long_edge & (long_stop_dist <= max_stop) & (long_stop_dist > 0)
@@ -296,10 +390,13 @@ class SessionSweep(IStrategy):
         # read it back (see _signal_candle()).
         dataframe["stop_px"] = np.nan
         dataframe["tp_px"] = np.nan
+        dataframe["entry_px"] = np.nan
         dataframe.loc[short_ok, "stop_px"] = short_stop[short_ok]
         dataframe.loc[short_ok, "tp_px"] = short_tp[short_ok]
+        dataframe.loc[short_ok, "entry_px"] = short_entry[short_ok]
         dataframe.loc[long_ok, "stop_px"] = long_stop[long_ok]
         dataframe.loc[long_ok, "tp_px"] = long_tp[long_ok]
+        dataframe.loc[long_ok, "entry_px"] = long_entry[long_ok]
 
         # --- Signals, tagged by session so the backtest report splits them ---
         dataframe.loc[short_ok & dataframe["in_london"], ["enter_short", "enter_tag"]] = (
@@ -364,6 +461,97 @@ class SessionSweep(IStrategy):
     # ================================================================== #
     # Callbacks
     # ================================================================== #
+    def _last_candle(self, pair: str) -> pd.Series | None:
+        """Most recent analysed candle (the signal candle when an entry is placed)."""
+        dataframe, _ = self.dp.get_analyzed_dataframe(pair, self.timeframe)
+        if dataframe is None or dataframe.empty:
+            return None
+        return dataframe.iloc[-1]
+
+    def custom_entry_price(
+        self,
+        pair: str,
+        trade: Trade | None,
+        current_time: datetime,
+        proposed_rate: float,
+        entry_tag: str | None,
+        side: str,
+        **kwargs,
+    ) -> float:
+        """Retest entry: limit order part-way back toward the swept level."""
+        if float(self.entry_retrace_frac.value) <= 0:
+            return proposed_rate
+        candle = self._last_candle(pair)
+        if candle is None or np.isnan(candle.get("entry_px", np.nan)):
+            return proposed_rate
+        entry_px = float(candle["entry_px"])
+        # Never chase: only improve on the proposed price.
+        return max(entry_px, proposed_rate) if side == "short" else min(entry_px, proposed_rate)
+
+    def check_entry_timeout(
+        self, pair: str, trade: Trade, order, current_time: datetime, **kwargs
+    ) -> bool:
+        """Cancel a retest limit order that has not filled within N candles."""
+        waited = (current_time - order.order_date_utc).total_seconds()
+        return waited >= int(self.entry_wait_candles.value) * 300
+
+    def custom_stake_amount(
+        self,
+        pair: str,
+        current_time: datetime,
+        current_rate: float,
+        proposed_stake: float,
+        min_stake: float | None,
+        max_stake: float,
+        leverage: float,
+        entry_tag: str | None,
+        side: str,
+        **kwargs,
+    ) -> float:
+        """Risk-based sizing: the stop loses `risk_per_trade_pct` of equity."""
+        risk_pct = float(self.risk_per_trade_pct.value)
+        if risk_pct <= 0:
+            return proposed_stake
+        candle = self._last_candle(pair)
+        if candle is None or np.isnan(candle.get("stop_px", np.nan)):
+            return proposed_stake
+        entry = candle.get("entry_px", np.nan)
+        entry = float(entry) if not np.isnan(entry) else current_rate
+        stop_dist = abs(entry - float(candle["stop_px"])) / entry
+        if stop_dist <= 0:
+            return proposed_stake
+        equity = self.wallets.get_total_stake_amount() if self.wallets else proposed_stake
+        # stake is margin; position notional = stake * leverage
+        stake = equity * risk_pct / 100 / (stop_dist * leverage)
+        if min_stake is not None and stake < min_stake:
+            return 0  # setup too small to size correctly - skip it
+        return min(stake, max_stake)
+
+    def confirm_trade_entry(
+        self,
+        pair: str,
+        order_type: str,
+        amount: float,
+        rate: float,
+        time_in_force: str,
+        current_time: datetime,
+        entry_tag: str | None,
+        side: str,
+        **kwargs,
+    ) -> bool:
+        """Limit the number of entries per session per UTC day."""
+        limit = int(self.max_trades_per_session.value)
+        if limit <= 0 or not entry_tag:
+            return True
+        session = entry_tag.split("_")[0]
+        day_start = current_time.replace(hour=0, minute=0, second=0, microsecond=0)
+        taken = [
+            t
+            for t in Trade.get_trades_proxy(pair=pair)
+            if t.open_date_utc >= day_start and (t.enter_tag or "").startswith(session + "_")
+        ]
+        return len(taken) < limit
+
     def leverage(
         self,
         pair: str,
@@ -448,7 +636,10 @@ class SessionSweep(IStrategy):
         current_profit: float,
         **kwargs,
     ) -> str | None:
-        """Optional time-based flatten at the end of the trading day."""
+        """Optional time stop and time-based flatten at the end of the trading day."""
+        max_hours = int(self.max_trade_hours.value)
+        if max_hours > 0 and current_time - trade.open_date_utc >= timedelta(hours=max_hours):
+            return "time_stop"
         if not self.exit_at_session_end.value:
             return None
         mod = current_time.hour * 60 + current_time.minute
