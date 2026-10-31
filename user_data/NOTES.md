@@ -272,8 +272,44 @@ What changed the picture:
 * **Flattening at 17:00 UTC** raises win rate and roughly halves drawdown, at no cost
   to PF. It is worth combining with the trend filter.
 
-All of this is one year of one pair, so treat `trend_1h` as a hypothesis, not a
-result, until it holds on a different year.
+All of this is one year of one pair. The next subsection shows `trend_1h` did not
+hold on a different year.
+
+### Out-of-sample check (2024-10-31 to 2025-10-31): the trend filter fails
+
+The same variants, run on the year before, which none of the choices above had seen:
+
+| Variant | Trades | Win % | PF | Profit % | Max DD % | London PF | NY PF |
+|---|---|---|---|---|---|---|---|
+| baseline | 644 | 18.5 | 0.92 | −97.6 | 99.4 | 1.16 | 0.73 |
+| trend_1h | 206 | 18.0 | 0.69 | −71.7 | 79.5 | 0.75 | 0.65 |
+| trend_rr1.5 | 204 | 17.6 | 0.70 | −69.6 | 78.1 | 0.76 | 0.67 |
+| trend_flat17 | 208 | 24.0 | 0.60 | −73.7 | 78.1 | 0.75 | 0.47 |
+| trend_ema20 | 126 | 14.3 | 0.60 | −59.5 | 66.6 | 0.64 | 0.58 |
+| trend_ema100 | 249 | 19.7 | 0.81 | −73.5 | 84.4 | 0.77 | 0.84 |
+
+**Conclusion: the strategy has no robust edge on SUI.**
+
+* Every trend variant is *worse* than the baseline on the unseen year. The PF of
+  1.22 in 2025-26 was a fit to that one bearish year, not a property of the idea.
+* The baseline itself loses on both years (PF 0.92 and 0.99). At 3x with the full
+  balance per trade it would have nearly wiped out the account in 2024-25.
+* Which session looks better flips between years (London PF 1.16 then 0.93,
+  NY 0.73 then 1.05). That is noise, not a session effect.
+
+Do **not** run this live, and do not keep tuning parameters on these two years:
+every further tweak would be fitted to data that has already been used.
+
+If you want to keep exploring the idea, change the hypothesis rather than the knobs,
+and decide the rule *before* looking at results. Reasonable candidates:
+
+* Test the unchanged baseline on BTC and ETH perps, where session liquidity is deeper.
+  If it fails there too, drop the idea.
+* Require a displacement candle after the reclaim, or a lower-timeframe break of
+  structure, before entering. That changes what a "sweep" is, not how it is filtered.
+
+Any new rule must be checked on both years, with PF above about 1.15 on each, before
+a dry run is worth the time.
 
 ## 5. Comparing variants in one go
 
@@ -304,8 +340,8 @@ python user_data/scripts/sessionsweep_variants.py --trend-set --timerange 202410
 
 ## 6. Suggested next tests
 
-1. **Out-of-sample check of the trend filter** on 2024-10 to 2025-10 (section 5).
-   This decides whether any of the rest is worth pursuing.
+1. **Done: out-of-sample check of the trend filter.** It failed (section 4), so the
+   parameter tests below are unlikely to rescue the strategy on SUI.
    When isolating sessions, remember that with one open trade the sessions
    compete for the slot, so compare session-only runs, not the baseline split.
 2. **Sweep definition.** `sweep_lookback` 1 (classic single-candle rejection)
