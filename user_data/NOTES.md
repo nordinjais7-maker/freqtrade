@@ -288,7 +288,7 @@ The same variants, run on the year before, which none of the choices above had s
 | trend_ema20 | 126 | 14.3 | 0.60 | −59.5 | 66.6 | 0.64 | 0.58 |
 | trend_ema100 | 249 | 19.7 | 0.81 | −73.5 | 84.4 | 0.77 | 0.84 |
 
-**Conclusion: the strategy has no robust edge on SUI.**
+**Conclusion: the strategy has no robust edge on SUI** (and, see below, not on BTC either).
 
 * Every trend variant is *worse* than the baseline on the unseen year. The PF of
   1.22 in 2025-26 was a fit to that one bearish year, not a property of the idea.
@@ -323,6 +323,20 @@ python user_data/scripts/sessionsweep_variants.py --pair BTC/USDT:USDT --only ba
 ```bash
 python user_data/scripts/sessionsweep_variants.py --pair BTC/USDT:USDT --only baseline trend_1h --timerange 20251031-20261031
 ```
+
+### BTC result: fails on both years
+
+| Year | Variant | Trades | Win % | PF | Profit % | Max DD % | London PF | NY PF |
+|---|---|---|---|---|---|---|---|---|
+| 2024-25 | baseline | 571 | 28.9 | 0.90 | −60.0 | 75.2 | 1.13 | 0.74 |
+| 2024-25 | trend_1h | 206 | 31.6 | 0.96 | −9.7 | 48.5 | 1.14 | 0.83 |
+| 2025-26 | baseline | 550 | 28.5 | 0.74 | −81.8 | 82.8 | 0.69 | 0.77 |
+| 2025-26 | trend_1h | 184 | 28.3 | 0.67 | −52.1 | 54.5 | 0.70 | 0.65 |
+
+The baseline needed PF above about 1.15 on both years and got 0.90 and 0.74, so
+by the rule fixed in advance **the idea is dropped**. Four tests on two pairs
+(SUI and BTC, two years each) all lose. London looked positive in 2024-25 on both
+pairs but negative in 2025-26 on both, so it is not a stable effect either.
 
 Any new rule must be checked on both years, with PF above about 1.15 on each, before
 a dry run is worth the time.
