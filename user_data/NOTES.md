@@ -308,6 +308,22 @@ and decide the rule *before* looking at results. Reasonable candidates:
 * Require a displacement candle after the reclaim, or a lower-timeframe break of
   structure, before entering. That changes what a "sweep" is, not how it is filtered.
 
+To run the BTC test (pass/fail rule fixed in advance: the **unchanged baseline**
+needs PF above about 1.15 on *both* years):
+
+```bash
+freqtrade download-data --config user_data/config_sessionsweep.json --userdir user_data \
+  --pairs "BTC/USDT:USDT" --timeframes 5m 1h --trading-mode futures --timerange 20241020-20261031
+```
+
+```bash
+python user_data/scripts/sessionsweep_variants.py --pair BTC/USDT:USDT --only baseline trend_1h --timerange 20241031-20251031
+```
+
+```bash
+python user_data/scripts/sessionsweep_variants.py --pair BTC/USDT:USDT --only baseline trend_1h --timerange 20251031-20261031
+```
+
 Any new rule must be checked on both years, with PF above about 1.15 on each, before
 a dry run is worth the time.
 

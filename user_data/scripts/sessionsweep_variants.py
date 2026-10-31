@@ -12,6 +12,7 @@ Usage (repo root, freqtrade virtualenv active, data already downloaded):
     python user_data/scripts/sessionsweep_variants.py
     python user_data/scripts/sessionsweep_variants.py --timerange 20250101-20251031
     python user_data/scripts/sessionsweep_variants.py --only baseline ny_only
+    python user_data/scripts/sessionsweep_variants.py --pair BTC/USDT:USDT --only baseline
 
 Each backtest takes about a minute on a recent Mac.
 """
@@ -64,13 +65,14 @@ def default_timerange() -> str:
     return f"{start:%Y%m%d}-{end:%Y%m%d}"
 
 
-def run_backtest(timerange: str, label: str) -> Path:
+def run_backtest(timerange: str, label: str, pair: str) -> Path:
     before = set(RESULTS_DIR.glob("backtest-result-*.zip"))
     cmd = [
         sys.executable, "-m", "freqtrade", "backtesting",
         "--config", CONFIG, "--userdir", "user_data",
         "--strategy", STRATEGY,
         "--timerange", timerange,
+        "--pairs", pair,
         "--cache", "none",
         "--export", "signals",
         "--notes", f"variant {label}",
@@ -143,6 +145,7 @@ def main() -> None:
     p.add_argument("--timerange", default=default_timerange())
     p.add_argument("--only", nargs="+", choices=list(VARIANTS), help="run only these variants")
     p.add_argument("--trend-set", action="store_true", help="run only the trend-filter short list")
+    p.add_argument("--pair", default="SUI/USDT:USDT", help="futures pair (default SUI/USDT:USDT)")
     args = p.parse_args()
 
     if not Path(CONFIG).is_file():
@@ -161,13 +164,13 @@ def main() -> None:
             print(f"[{i}/{len(names)}] {name} ...", flush=True)
             params = {"strategy_name": STRATEGY, "params": VARIANTS[name]}
             PARAM_FILE.write_text(json.dumps(params, indent=2))
-            rows[name] = summarize(run_backtest(args.timerange, name))
+            rows[name] = summarize(run_backtest(args.timerange, name, args.pair))
     finally:
         PARAM_FILE.unlink(missing_ok=True)
         if had_file:
             shutil.move(backup, PARAM_FILE)
 
-    print(f"\nSessionSweep variants, SUI/USDT:USDT, {args.timerange}\n")
+    print(f"\nSessionSweep variants, {args.pair}, {args.timerange}\n")
     print_table(rows)
 
 
