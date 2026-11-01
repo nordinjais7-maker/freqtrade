@@ -21,6 +21,11 @@ Usage (repo root, freqtrade virtualenv active, data already downloaded):
         --pair SUI/USDT:USDT BTC/USDT:USDT --timerange 20241031-20251031 20251031-20261031
 
 Each backtest takes about a minute on a recent Mac.
+
+After each table a ROBUSTNESS table is printed (see robustness.py): permutation
+p-value, bootstrap 95% bands, calendar-fold stability and a bull / bear / chop
+regime split. The final summary adds a PASS / WATCH / FAIL / THIN verdict per
+variant. Skip it with --no-robust.
 """
 
 import argparse
@@ -30,6 +35,8 @@ import subprocess
 import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+
+import robustness
 
 
 CONFIG = "user_data/config_sessionsweep.json"
@@ -257,8 +264,11 @@ def _pf(profits) -> float:
     return float("inf") if losses == 0 else gains / losses
 
 
-def summarize(result_zip: Path) -> dict:
-    """Headline metrics plus the London / NY split from one backtest result."""
+def summarize(result_zip: Path, regimes=None, robust: bool = True) -> dict:
+    """Headline metrics plus the London / NY split from one backtest result.
+
+    With robust=True the row also carries "_robust" (see robustness.analyze).
+    """
     from freqtrade.data.btanalysis import load_backtest_data, load_backtest_stats
 
     stats = load_backtest_stats(result_zip)["strategy"][STRATEGY]
@@ -282,6 +292,8 @@ def summarize(result_zip: Path) -> dict:
                     f"{session}_usdt": 0.0,
                 }
             )
+        if robust:
+            zero["_robust"] = robustness.analyze(trades, regimes)
         return zero
     row = {
         "trades": stats["total_trades"],
@@ -297,6 +309,8 @@ def summarize(result_zip: Path) -> dict:
         row[f"{session}_win%"] = 100 * (t["profit_abs"] > 0).mean() if len(t) else 0.0
         row[f"{session}_PF"] = _pf(t["profit_abs"]) if len(t) else 0.0
         row[f"{session}_usdt"] = t["profit_abs"].sum()
+    if robust:
+        row["_robust"] = robustness.analyze(trades, regimes)
     return row
 
 
@@ -351,6 +365,10 @@ def main() -> None:
         choices=["SessionSweep", "SessionMomentum", "SessionSweep1h", "SessionMomentum1h"],
         help="which strategy's variant table to use (default SessionSweep)",
     )  # fmt: skip
+    p.add_argument(
+        "--no-robust", action="store_true",
+        help="skip the permutation / bootstrap / fold / regime robustness tables",
+    )  # fmt: skip
     args = p.parse_args()
     global STRATEGY, PARAM_FILE, VARIANTS
     STRATEGY = args.strategy
@@ -383,14 +401,23 @@ def main() -> None:
     results: dict[tuple[str, str], dict[str, dict]] = {}
     i = 0
     try:
+        regime_cache: dict[str, object] = {}
         for pair, timerange in combos:
+            if not args.no_robust and pair not in regime_cache:
+                regime_cache[pair] = robustness.load_regimes(pair)
+                if regime_cache[pair] is None:
+                    print(f"  (no cached 1h candles for {pair}: regime split skipped)")
             rows: dict[str, dict] = {}
             for name in names:
                 i += 1
                 print(f"[{i}/{total}] {pair} {timerange} {name} ...", flush=True)
                 params = {"strategy_name": STRATEGY, "params": VARIANTS[name]}
                 PARAM_FILE.write_text(json.dumps(params, indent=2))
-                rows[name] = summarize(run_backtest(timerange, name, pair))
+                rows[name] = summarize(
+                    run_backtest(timerange, name, pair),
+                    regime_cache.get(pair),
+                    robust=not args.no_robust,
+                )
             results[(pair, timerange)] = rows
     finally:
         PARAM_FILE.unlink(missing_ok=True)
@@ -398,8 +425,13 @@ def main() -> None:
             shutil.move(backup, PARAM_FILE)
 
     for (pair, timerange), rows in results.items():
-        print(f"\nSessionSweep variants, {pair}, {timerange}\n")
+        print(f"\n{STRATEGY} variants, {pair}, {timerange}\n")
         print_table(rows)
+        if not args.no_robust:
+            print(f"\nROBUSTNESS, {pair}, {timerange}\n")
+            robustness.print_robust_table(
+                {n: r["_robust"] for n, r in rows.items()}, n_tests=total
+            )
 
     if len(results) > 1:
         print(
@@ -407,10 +439,22 @@ def main() -> None:
         )
         heads = [f"{p.split('/')[0]} {tr[:4]}-{tr[11:13]}" for p, tr in results]
         width = max(len(n) for n in names) + 2
-        print("variant".ljust(width) + " ".join(h.rjust(12) for h in heads) + "      min")
+        tail = "      min" + ("  verdict" if not args.no_robust else "")
+        print("variant".ljust(width) + " ".join(h.rjust(12) for h in heads) + tail)
         for name in names:
             pfs = [results[k][name]["PF"] for k in results]
-            print(name.ljust(width) + " ".join(f"{pf:12.2f}" for pf in pfs) + f" {min(pfs):8.2f}")
+            line = name.ljust(width) + " ".join(f"{pf:12.2f}" for pf in pfs) + f" {min(pfs):8.2f}"
+            if not args.no_robust:
+                cells = [results[k][name]["_robust"] for k in results]
+                line += "  " + robustness.verdict(cells, n_tests=total)
+            print(line)
+        if not args.no_robust:
+            print(
+                "\nverdict: PASS = every column has PF95%lo > 1, p_perm below the corrected bar"
+                "\nand >= 60% of calendar folds profitable. WATCH = positive expectancy and"
+                "\nstable folds everywhere but not proven beyond luck. FAIL = loses somewhere."
+                "\nTHIN = fewer than 30 trades in some column (can't judge)."
+            )
 
 
 if __name__ == "__main__":

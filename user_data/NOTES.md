@@ -712,6 +712,26 @@ freqtrade download-data --config user_data/config_sessionsweep.json --userdir us
 python user_data/scripts/sessionsweep_variants.py --trend-set --timerange 20241031-20251031
 ```
 
+## 5b. Robustness tables (`user_data/scripts/robustness.py`)
+
+`sessionsweep_variants.py` now prints a ROBUSTNESS table after every variant table
+and a verdict column in the final cross-pair summary (`--no-robust` skips it).
+Ported from HKUDS/Vibe-Trading's validation and per-regime evidence modules.
+
+| Column | Meaning | A real edge shows |
+|---|---|---|
+| `p_perm` | One-sided sign-flip permutation test: chance that random +/- luck gives this average trade | `*` = below 0.05 / number of tests run |
+| `exp95%lo` | Bootstrap 2.5th percentile of USDT per trade | > 0 |
+| `PF95%lo..hi` | Bootstrap 95% band for profit factor | lower end > 1 |
+| `WF+` | Equal calendar folds (5, by close date) with PF > 1 | >= 3/5 |
+| `bull/bear/chop` | Trades split by the pair's trailing 30-day return at the prior daily close (>= +10% bull, <= -10% bear, else chop; cached 1h futures candles) | PF > 1 in more than one regime |
+
+Verdict across all pair/year columns: **PASS** (PF95%lo > 1, p_perm below the
+corrected bar and >= 60% profitable folds everywhere), **WATCH** (positive
+expectancy and stable folds everywhere, not yet beyond luck), **FAIL** (loses
+somewhere), **THIN** (< 30 trades in a column). The multiple-testing correction
+matters: 8 variants x 4 columns = 32 tests, so the bar is p < 0.0016.
+
 ## 6. Suggested next tests
 
 1. **Done: out-of-sample check of the trend filter.** It failed (section 4), so the
