@@ -861,6 +861,46 @@ python user_data/scripts/sessionsweep_variants.py --strategy SuiFlushShort --onl
 
 Then, only if something passes, the remaining variants to see which rules carry it.
 
+### Results: replication holds, the two-year test fails
+
+**Replication** (OKX flow, defaults, 2026-09-03 → 2026-10-31, 1m detail):
+57 trades, win 52.6%, PF 1.67, +9.5% at 1% risk, max drawdown 2.8%. That matches
+the playbook's direction (its 78 trades, +0.47R before fees). But the permutation
+p-value is 0.057, the bootstrap PF band is 0.88–3.25 and 3 of 5 calendar folds
+were profitable: a good two months, not yet evidence. Two thirds of the profit
+came from the 30 trades taken after a +10% 30-day rally (bull-regime PF 3.03);
+in chop the rule lost (PF 0.77).
+
+**Main test** (Binance flow, SUI, 1m detail, fees and funding included):
+
+| Variant | 2024-25 | 2025-26 | Trades | Verdict |
+|---|---|---|---|---|
+| f_bin_pct80 (main candidate) | 0.62 | 0.75 | 277 / 171 | FAIL |
+| f_bin_pct90 | 0.58 | 0.67 | 181 / 111 | FAIL |
+| f_bin_abs2.0 | 0.70 | 0.70 | 502 / 329 | FAIL |
+| f_bin_noflow (control, no ratio filter) | 0.68 | 0.69 | 785 / 717 | FAIL |
+
+Zero of five calendar folds profitable for every candidate in 2024-25; the
+bootstrap PF bands top out at 0.82–1.07. **The long/short filter is not the edge**:
+with it (0.62 / 0.75) the strategy is no better than without it (0.68 / 0.69),
+which is the opposite of the playbook's central claim. The range break itself
+loses about 0.3R per trade after costs across both years, in every regime label.
+
+**Conclusion.** The playbook's result is a two-month regime artefact: shorting SUI
+breakdowns paid during Sep–Oct 2026 and in the aftermath of sharp rallies, and
+lost over the two years before. The code is correct; the idea does not generalise.
+Do not dry-run or trade it.
+
+One diagnostic that would sharpen this (not a search for a winner): run
+`f_bin_pct80` over the same 2026-09-03 → 2026-10-31 window. If it also shows
+PF near 1.6, the Binance ratio is a faithful proxy for OKX's and the two-year
+result stands as is; if it does not, the OKX and Binance ratios behave
+differently and the replication and main test are not directly comparable.
+
+```bash
+python user_data/scripts/sessionsweep_variants.py --strategy SuiFlushShort --only f_bin_pct80 f_bin_noflow --timeframe-detail 1m --pair SUI/USDT:USDT --timerange 20260903-20261031
+```
+
 ## 5. Comparing variants in one go
 
 `user_data/scripts/sessionsweep_variants.py` runs a set of variants and prints one
