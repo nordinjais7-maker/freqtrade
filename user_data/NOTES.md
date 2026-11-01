@@ -660,6 +660,27 @@ python user_data/scripts/sessionsweep_variants.py --strategy SessionMomentum1h -
 Hourly backtests run about ten times faster than 5m. The pass rule is the same;
 with fewer trades, treat any column under about 30 trades as noise.
 
+### SessionSweep1h results: fail
+
+| Variant | SUI 2024-25 | SUI 2025-26 | BTC 2024-25 | BTC 2025-26 | Min |
+|---|---|---|---|---|---|
+| risk1 (control) | 0.85 | 1.13 | 0.74 | 0.80 | 0.74 |
+| risk1_first_sweep | 0.87 | 1.16 | 0.73 | 0.81 | 0.73 |
+| risk1_retest | 0.93 | 1.17 | 0.65 | 0.76 | 0.65 |
+| risk1_compression | 0.68 | 1.20 | 0.71 | 0.72 | 0.68 |
+| risk1_timestop6h | 0.82 | 1.16 | 0.74 | 0.70 | 0.70 |
+| risk1_mss | 0.64 | 1.06 | 0.84 | 1.08 | 0.64 (32–90 trades) |
+| risk1_displacement | 0.50 | 2.19 | 0.65 | 1.11 | 0.50 (8–67 trades) |
+| risk1_confluence | 1.33 | 1.08 | 0.58 | 1.21 | 0.58 (8–61 trades) |
+
+Same picture as on 5m, with about half the trades: good on SUI 2025-26, losing
+elsewhere. The MSS, displacement and confluence rows have too few trades on SUI
+to mean anything (8–37), and their BTC columns still disagree with each other.
+
+**Note on the 1h momentum run:** it crashed on a variant that produced zero trades
+(`m_disp1.5`, a full-ATR body is too strict on hourly candles). The runner now
+reports such a variant as zeros instead of failing; rerun to get the table.
+
 ## 5. Comparing variants in one go
 
 `user_data/scripts/sessionsweep_variants.py` runs a set of variants and prints one

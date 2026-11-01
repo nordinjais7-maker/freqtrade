@@ -263,6 +263,26 @@ def summarize(result_zip: Path) -> dict:
 
     stats = load_backtest_stats(result_zip)["strategy"][STRATEGY]
     trades = load_backtest_data(result_zip, STRATEGY)
+    if trades.empty:
+        # A variant that never traded: an empty frame has no columns at all.
+        zero = {
+            "trades": 0,
+            "win%": 0.0,
+            "PF": 0.0,
+            "profit%": 0.0,
+            "maxDD%": 0.0,
+            "maxLossStreak": 0,
+        }
+        for session in ("london", "ny"):
+            zero.update(
+                {
+                    f"{session}_n": 0,
+                    f"{session}_win%": 0.0,
+                    f"{session}_PF": 0.0,
+                    f"{session}_usdt": 0.0,
+                }
+            )
+        return zero
     row = {
         "trades": stats["total_trades"],
         "win%": 100 * stats["winrate"],
