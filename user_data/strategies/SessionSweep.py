@@ -228,6 +228,15 @@ class SessionSweep(IStrategy):
     )
     # Time stop: close a trade still open after this many hours. 0 = off.
     max_trade_hours = IntParameter(0, 48, default=0, space="sell", optimize=False)
+    # Regime gate: only trade when the pair's trailing return over
+    # `regime_lookback_days`, measured at the PREVIOUS daily close (no look-ahead),
+    # is >= regime_min_return_pct. Same definition as the "bull" bucket in
+    # user_data/scripts/robustness.py. Off by default.
+    use_regime_filter = BooleanParameter(default=False, space="buy", optimize=False)
+    regime_lookback_days = IntParameter(10, 90, default=30, space="buy", optimize=False)
+    regime_min_return_pct = DecimalParameter(
+        -50.0, 50.0, default=10.0, decimals=1, space="buy", optimize=False
+    )
 
     # Entry model. "reclaim" = original (enter on the close back inside the range).
     # "breakout" = after the reclaim, wait up to `confirm_window` candles for a
@@ -299,12 +308,32 @@ class SessionSweep(IStrategy):
     # ================================================================== #
     # Indicators
     # ================================================================== #
+    def __init__(self, config) -> None:
+        super().__init__(config)
+        # The regime gate needs `regime_lookback_days` (+2) days of history before
+        # the first tradable candle; raise the startup only when it is switched on,
+        # so every other variant keeps its original data window. Parameter values
+        # are applied later (ft_bot_start), after the backtester has already read
+        # startup_candle_count, so read them straight from the parameter file here.
+        buy = (getattr(self, "_ft_params_from_file", None) or {}).get("buy", {})
+        if buy.get("use_regime_filter", self.use_regime_filter.value):
+            lookback = int(buy.get("regime_lookback_days", self.regime_lookback_days.value))
+            per_day = 86400 // timeframe_to_seconds(self.timeframe)
+            self.startup_candle_count = max(self.startup_candle_count, (lookback + 2) * per_day)
+
     def populate_indicators(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
         date = dataframe["date"]
         # Minute of day in UTC (freqtrade candles are UTC tz-aware).
         mod = date.dt.hour * 60 + date.dt.minute
         day = date.dt.floor("D")
         dataframe["minute_of_day"] = mod
+
+        # Trailing regime return known at the start of each UTC day: last close of
+        # day D-1 vs last close of day D-1-lookback.
+        daily_close = dataframe.set_index("date")["close"].resample("1D").last()
+        lb = int(self.regime_lookback_days.value)
+        regime = (daily_close / daily_close.shift(lb) - 1).shift(1)
+        dataframe["regime_ret"] = day.map(regime).astype(float)
 
         a0, a1 = int(self.asia_start_min.value), int(self.asia_end_min.value)
         l0, l1 = int(self.london_start_min.value), int(self.london_end_min.value)
@@ -514,6 +543,12 @@ class SessionSweep(IStrategy):
         if self.use_trend_filter.value and f"ema_{tf}" in dataframe.columns:
             short_ok &= dataframe[f"close_{tf}"] < dataframe[f"ema_{tf}"]
             long_ok &= dataframe[f"close_{tf}"] > dataframe[f"ema_{tf}"]
+
+        # --- Optional regime gate (trailing N-day return at the prior close) ---
+        if self.use_regime_filter.value:
+            in_regime = dataframe["regime_ret"] >= float(self.regime_min_return_pct.value) / 100
+            short_ok &= in_regime
+            long_ok &= in_regime
 
         # --- Optional RSI overbought / oversold filter ----------------------
         if self.use_rsi_filter.value:

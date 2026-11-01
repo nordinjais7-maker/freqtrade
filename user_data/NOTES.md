@@ -788,6 +788,59 @@ expectancy and stable folds everywhere, not yet beyond luck), **FAIL** (loses
 somewhere), **THIN** (< 30 trades in a column). The multiple-testing correction
 matters: 8 variants x 4 columns = 32 tests, so the bar is p < 0.0016.
 
+## 5c. Regime gate (`use_regime_filter`) and its pre-registered test
+
+The 2026-11-01 robustness run of `SessionSweep1h --enhance-set` failed every
+variant, but the regime split showed the SUI profit sat in the **bull** bucket in
+both years (risk1 PF 1.08 / 1.79, retest 1.29 / 1.61, timestop6h 1.07 / 1.71;
+bear and chop at or below 1). BTC did not show it. Because that idea came from
+looking at the split, it needs unseen data.
+
+New strategy parameters (all off by default, in `SessionSweep.py`, inherited by
+`SessionSweep1h`):
+
+| Parameter | Default | Meaning |
+|---|---|---|
+| `use_regime_filter` | False | Only allow entries (long and short) when the pair's trailing return is high enough |
+| `regime_lookback_days` | 30 | Trailing window, measured from the previous daily close (no look-ahead) |
+| `regime_min_return_pct` | 10.0 | Minimum trailing return in % |
+
+The definition matches the "bull" bucket in `robustness.py`. When the gate is on,
+`startup_candle_count` rises to (lookback + 2) days so the first tradable candle
+already has a regime value; every other variant keeps its original data window.
+Download at least ~32 days of extra history before each timerange.
+
+Runner: `--regime-set` runs `rg_risk1`, `rg_first_sweep`, `rg_retest`,
+`rg_timestop6h` next to their ungated controls.
+
+**Pre-registered test** (decided 2026-11-01, before any new data is seen):
+
+* Candidates: exactly four, `rg_risk1`, `rg_first_sweep`, `rg_retest`,
+  `rg_timestop6h` on `SessionSweep1h`, unchanged.
+* In-sample reference only (does not count): SUI 2024-25 and 2025-26.
+* New data: SUI 2023-10-31 to 2024-10-31, and ETH/USDT:USDT for 2024-25 and
+  2025-26. Three unseen columns.
+* Pass: PF above 1.10 in every unseen column with at least 30 trades, and a
+  robustness verdict other than FAIL. Expect ~50-80 trades per column; fewer than
+  30 is reported as THIN and cannot pass.
+* If a candidate passes: a 4-week dry run, not live money.
+
+```bash
+freqtrade download-data --config user_data/config_sessionsweep.json --userdir user_data --pairs "SUI/USDT:USDT" --timeframes 1h 4h --trading-mode futures --timerange 20230920-20241031 --prepend
+```
+
+```bash
+freqtrade download-data --config user_data/config_sessionsweep.json --userdir user_data --pairs "ETH/USDT:USDT" --timeframes 1h 4h --trading-mode futures --timerange 20240920-20261031
+```
+
+```bash
+# in-sample reference
+python user_data/scripts/sessionsweep_variants.py --strategy SessionSweep1h --regime-set --pair SUI/USDT:USDT --timerange 20241031-20251031 20251031-20261031
+# the unseen test
+python user_data/scripts/sessionsweep_variants.py --strategy SessionSweep1h --regime-set --pair SUI/USDT:USDT --timerange 20231031-20241031
+python user_data/scripts/sessionsweep_variants.py --strategy SessionSweep1h --regime-set --pair ETH/USDT:USDT --timerange 20241031-20251031 20251031-20261031
+```
+
 ## 6. Suggested next tests
 
 1. **Done: out-of-sample check of the trend filter.** It failed (section 4), so the

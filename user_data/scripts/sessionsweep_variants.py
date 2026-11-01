@@ -92,6 +92,22 @@ VARIANTS.update(
         },
     }
 )  # fmt: skip
+# Regime gate (trade only when the pair is up >= 10% over the prior 30 days), added
+# after the 2026-11-01 robustness run showed SessionSweep1h's SUI profit sat in that
+# bucket. Pre-registered for unseen data, see NOTES.md section 5c.
+RG = {"use_regime_filter": True}
+VARIANTS.update(
+    {
+        "rg_risk1": {"buy": {**RISK, **RG}},
+        "rg_first_sweep": {"buy": {**RISK, **RG, "max_trades_per_session": 1}},
+        "rg_retest": {"buy": {**RISK, **RG, "entry_retrace_frac": 0.5}},
+        "rg_timestop6h": {"buy": {**RISK, **RG}, "sell": {"max_trade_hours": 6}},
+    }
+)  # fmt: skip
+REGIME_SET = [
+    "risk1", "rg_risk1", "risk1_first_sweep", "rg_first_sweep",
+    "risk1_retest", "rg_retest", "risk1_timestop6h", "rg_timestop6h",
+]  # fmt: skip
 ENHANCE_SET = [
     "risk1", "risk1_first_sweep", "risk1_mss", "risk1_displacement", "risk1_retest",
     "risk1_compression", "risk1_timestop6h", "risk1_confluence",
@@ -356,6 +372,10 @@ def main() -> None:
         "--enhance-set", action="store_true", help="run the structural-enhancement variants"
     )
     p.add_argument("--entry-set", action="store_true", help="run the breakout-entry variants")
+    p.add_argument(
+        "--regime-set", action="store_true",
+        help="run the regime-gate variants next to their ungated controls",
+    )  # fmt: skip
     p.add_argument("--timing-set", action="store_true", help="run the session-window variants")
     p.add_argument(
         "--htf-set", action="store_true", help="run the higher-timeframe RSI/trend variants"
@@ -387,7 +407,8 @@ def main() -> None:
 
     sets = {
         "trend_set": TREND_SET, "enhance_set": ENHANCE_SET,
-        "entry_set": ENTRY_SET, "timing_set": TIMING_SET, "htf_set": HTF_SET,
+        "entry_set": ENTRY_SET, "regime_set": REGIME_SET,
+        "timing_set": TIMING_SET, "htf_set": HTF_SET,
     }  # fmt: skip
     chosen = [v for k, v in sets.items() if getattr(args, k)]
     if STRATEGY.startswith("SessionMomentum") and chosen:
