@@ -464,6 +464,39 @@ python user_data/scripts/sessionsweep_timing.py
 A timing effect is real only if the same hours win on both pairs and both years;
 a cell with fewer than about 30 trades is noise.
 
+### Entry-model results: fail, and one bug found
+
+Profit factor, 1% risk, run on the Mac (control = `risk1`):
+
+| Variant | SUI 2024-25 | SUI 2025-26 | BTC 2024-25 | BTC 2025-26 | Min |
+|---|---|---|---|---|---|
+| risk1 (control) | 0.82 | 1.06 | 0.85 | 0.71 | 0.71 |
+| brk | 0.88 | 1.07 | 0.83 | **0.76** | 0.76 |
+| brk_fib50 | 0.71 | (bug) | 0.68 | 0.52 | 0.52 |
+| brk_fib618 | 0.82 | (bug) | 0.71 | 0.57 | 0.57 |
+| brk_resistance | 0.87 | 1.11 | 0.83 | 0.75 | 0.75 |
+| brk_flush | 0.60 | 0.97 | 0.45 | 0.49 | 0.45 |
+| brk_disp_flush | 0.67 | 1.13 | 0.50 | 0.44 | 0.44 |
+| brk_all_signals | 0.63 | 1.10 | 0.51 | 0.43 | 0.43 |
+| reclaim_fib618_flush | 0.66 | 0.80 | 0.47 | 0.53 | 0.47 |
+
+* **Breakout confirmation** is a small, fairly consistent improvement over the
+  control (better in 3 of 4 columns, best minimum so far at 0.76) with a higher
+  win rate and about half the drawdown, but it is still a losing strategy.
+* **The flush exit is clearly harmful** (0.45–0.60 on three columns). Exiting on the
+  first opposite-colour candle cuts the winners that pay for everything else.
+* **50% / 61.8% targets are worse** than the full range in every valid column: the
+  winners get smaller while the stop stays where it is.
+* **Resistance targets** change little.
+
+**Bug found and fixed.** `brk_fib50` / `brk_fib618` on SUI 2025-26 show 4 trades and
+a PF near 50. In breakout mode the entry comes after the reclaim *and* a further
+break, so a 50% or 61.8% target was often already behind the entry; `custom_roi`
+then returned no target, one short in a falling market stayed open for months and
+blocked the single trade slot. Entries now require the target to lie beyond the
+planned entry (the default trade list is unchanged). Those two cells are invalid;
+rerun them if they matter. The `--timing-set` was not run yet.
+
 ## 4d. Higher timeframe: 4h trend and RSI overbought / oversold
 
 | Parameter | Default | Effect when on |

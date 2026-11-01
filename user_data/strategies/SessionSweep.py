@@ -491,8 +491,19 @@ class SessionSweep(IStrategy):
         short_rr = (short_entry - short_tp) / (short_stop - short_entry)
         long_rr = (long_tp - long_entry) / (long_entry - long_stop)
 
-        short_ok = short_edge & (short_stop_dist <= max_stop) & (short_stop_dist > 0)
-        long_ok = long_edge & (long_stop_dist <= max_stop) & (long_stop_dist > 0)
+        # The target must lie beyond the planned entry. In breakout mode (or with a
+        # small tp_range_fraction) the entry can already be past a 50% / 61.8%
+        # target; without this guard such a trade has no take profit at all and
+        # can sit open for months, blocking the single trade slot.
+        short_ok = (
+            short_edge
+            & (short_stop_dist <= max_stop)
+            & (short_stop_dist > 0)
+            & (short_tp < short_entry)
+        )
+        long_ok = (
+            long_edge & (long_stop_dist <= max_stop) & (long_stop_dist > 0) & (long_tp > long_entry)
+        )
         if min_rr > 0:
             short_ok &= short_rr >= min_rr
             long_ok &= long_rr >= min_rr
