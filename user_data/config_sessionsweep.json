@@ -2,7 +2,6 @@
     "$schema": "https://schema.freqtrade.io/schema.json",
     "bot_name": "sessionsweep_sui",
     "strategy": "SessionSweep",
-    "timeframe": "5m",
 
     "trading_mode": "futures",
     "margin_mode": "isolated",

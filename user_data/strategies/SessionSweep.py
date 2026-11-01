@@ -65,6 +65,7 @@ from freqtrade.strategy import (
     IStrategy,
     informative,
     stoploss_from_absolute,
+    timeframe_to_seconds,
 )
 
 
@@ -628,7 +629,7 @@ class SessionSweep(IStrategy):
     ) -> bool:
         """Cancel a retest limit order that has not filled within N candles."""
         waited = (current_time - order.order_date_utc).total_seconds()
-        return waited >= int(self.entry_wait_candles.value) * 300
+        return waited >= int(self.entry_wait_candles.value) * timeframe_to_seconds(self.timeframe)
 
     def custom_stake_amount(
         self,

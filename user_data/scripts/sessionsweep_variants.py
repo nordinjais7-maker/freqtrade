@@ -327,14 +327,15 @@ def main() -> None:
         "--htf-set", action="store_true", help="run the higher-timeframe RSI/trend variants"
     )
     p.add_argument(
-        "--strategy", default="SessionSweep", choices=["SessionSweep", "SessionMomentum"],
+        "--strategy", default="SessionSweep",
+        choices=["SessionSweep", "SessionMomentum", "SessionSweep1h", "SessionMomentum1h"],
         help="which strategy's variant table to use (default SessionSweep)",
     )  # fmt: skip
     args = p.parse_args()
     global STRATEGY, PARAM_FILE, VARIANTS
     STRATEGY = args.strategy
     PARAM_FILE = Path(f"user_data/strategies/{STRATEGY}.json")
-    if STRATEGY == "SessionMomentum":
+    if STRATEGY.startswith("SessionMomentum"):
         VARIANTS = MOMENTUM_VARIANTS
 
     if not Path(CONFIG).is_file():
@@ -351,7 +352,7 @@ def main() -> None:
         "entry_set": ENTRY_SET, "timing_set": TIMING_SET, "htf_set": HTF_SET,
     }  # fmt: skip
     chosen = [v for k, v in sets.items() if getattr(args, k)]
-    if STRATEGY == "SessionMomentum" and chosen:
+    if STRATEGY.startswith("SessionMomentum") and chosen:
         sys.exit("The --*-set options are SessionSweep tables; use --only or no set for momentum.")
     names = args.only or (chosen[0] if chosen else list(VARIANTS))
     unknown = [n for n in names if n not in VARIANTS]

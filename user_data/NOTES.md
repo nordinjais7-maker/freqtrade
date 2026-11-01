@@ -7,6 +7,7 @@ Session-timing liquidity-sweep strategy for Freqtrade, built for
 |---|---|
 | `user_data/strategies/SessionSweep.py` | The sweep-and-reclaim strategy (all logic + parameters, heavily commented) |
 | `user_data/strategies/SessionMomentum.py` | The Asia-range breakout momentum strategy (section 4e) |
+| `user_data/strategies/SessionSweep1h.py`, `SessionMomentum1h.py` | The same two strategies on 1-hour candles (section 4f) |
 | `user_data/config_sessionsweep.json` | Futures / isolated / dry-run config, 1 open trade, **API keys are placeholders** |
 | `user_data/scripts/sessionsweep_backtest.sh` | Exact download + backtest + session-split commands for your Mac |
 | `user_data/scripts/sessionsweep_variants.py` | Runs a batch of parameter variants and prints one comparison table |
@@ -584,6 +585,44 @@ python user_data/scripts/sessionsweep_variants.py --strategy SessionMomentum --p
 Expect roughly 150–300 trades per pair-year (one per session at most). The
 volume filter is the part most likely to matter on real data: synthetic volume
 is random, so it was only checked for correctness, not for effect.
+
+## 4f. 1-hour versions: `SessionSweep1h` and `SessionMomentum1h`
+
+Both are thin subclasses that keep every rule, parameter and callback of the 5m
+strategy and change only the base timeframe (and, for the sweep, the candle-count
+defaults: lookback, confirmation window, retest wait and MSS lookback become 2–3
+hourly candles instead of 6 five-minute ones).
+
+What changes on hourly candles:
+
+* **Asia range** = candles opening 00:00–06:00. **London** = candles opening
+  07:00–11:00. **New York** = candles opening 13:00–16:00, because the 12:00
+  candle opens before the 12:30 session start; set `ny_start_min` to 720 to
+  include it.
+* A sweep / breakout is judged on the **hourly** close, so there are far fewer
+  signals (synthetic data: 118 sweep trades per 114 days vs 440 on 5m) and each
+  one carries more information. Displacement and volume compare against hourly
+  ATR and volume, so `SessionMomentum1h` defaults to a 0.5 ATR body and 1.2×
+  volume (a full hourly ATR body almost never occurs).
+* Only 1h and 4h data are needed. The 1h informative merge is a no-op on a 1h
+  base; the 4h one still shifts so no unfinished 4h candle is visible.
+
+**Config change:** `timeframe` was removed from `config_sessionsweep.json` so each
+strategy's own timeframe applies (Freqtrade's config value would otherwise
+override the subclass back to 5m). The 5m strategies are unaffected.
+
+Test exactly as before, with the strategy name:
+
+```bash
+python user_data/scripts/sessionsweep_variants.py --strategy SessionSweep1h --enhance-set --pair SUI/USDT:USDT BTC/USDT:USDT --timerange 20241031-20251031 20251031-20261031
+```
+
+```bash
+python user_data/scripts/sessionsweep_variants.py --strategy SessionMomentum1h --pair SUI/USDT:USDT BTC/USDT:USDT --timerange 20241031-20251031 20251031-20261031
+```
+
+Hourly backtests run about ten times faster than 5m. The pass rule is the same;
+with fewer trades, treat any column under about 30 trades as noise.
 
 ## 5. Comparing variants in one go
 
