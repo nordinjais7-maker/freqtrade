@@ -21,6 +21,7 @@ pair's cached 1h candles through Freqtrade's own data loader.
 
 from __future__ import annotations
 
+import itertools
 import math
 from pathlib import Path
 
@@ -90,7 +91,7 @@ def time_split(trades: pd.DataFrame, n_folds: int = N_FOLDS) -> dict:
     close = pd.to_datetime(trades["close_date"], utc=True)
     edges = pd.date_range(close.min(), close.max(), periods=n_folds + 1)
     pfs = []
-    for lo, hi in zip(edges[:-1], edges[1:], strict=True):
+    for lo, hi in itertools.pairwise(edges):
         last = hi == edges[-1]
         mask = (close >= lo) & ((close <= hi) if last else (close < hi))
         fold = trades.loc[mask, "profit_abs"].to_numpy(dtype=float)
@@ -209,7 +210,8 @@ def print_robust_table(rows: dict[str, dict], n_tests: int) -> None:
     print(
         f"\np_perm = chance random +/- luck gives this average trade (one-sided sign-flip test)."
         f"\n* = p_perm < {alpha:.4f} (0.05 split across {n_tests} tests: the bar for 'not luck')."
-        "\nexp95%lo / PF95%lo..hi = bootstrap 95% band; a real edge keeps exp95%lo > 0 and PF95%lo > 1."
+        "\nexp95%lo / PF95%lo..hi = bootstrap 95% band; a real edge keeps exp95%lo > 0"
+        " and PF95%lo > 1."
         f"\nWF+ = calendar folds (of {N_FOLDS}) with PF > 1. Regime = pair's trailing "
         f"{REGIME_LOOKBACK_DAYS}d return at the prior close (>= +{REGIME_THRESHOLD:.0%} bull, "
         f"<= -{REGIME_THRESHOLD:.0%} bear, else chop)."

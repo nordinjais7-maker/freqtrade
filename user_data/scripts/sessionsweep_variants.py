@@ -424,14 +424,17 @@ def main() -> None:
         if had_file:
             shutil.move(backup, PARAM_FILE)
 
+    _report(results, names, total, robust=not args.no_robust)
+
+
+def _report(results: dict, names: list[str], total: int, robust: bool) -> None:
+    """Print one table per pair/year, the robustness tables and the cross-column grid."""
     for (pair, timerange), rows in results.items():
         print(f"\n{STRATEGY} variants, {pair}, {timerange}\n")
         print_table(rows)
-        if not args.no_robust:
+        if robust:
             print(f"\nROBUSTNESS, {pair}, {timerange}\n")
-            robustness.print_robust_table(
-                {n: r["_robust"] for n, r in rows.items()}, n_tests=total
-            )
+            robustness.print_robust_table({n: r["_robust"] for n, r in rows.items()}, n_tests=total)
 
     if len(results) > 1:
         print(
@@ -439,16 +442,16 @@ def main() -> None:
         )
         heads = [f"{p.split('/')[0]} {tr[:4]}-{tr[11:13]}" for p, tr in results]
         width = max(len(n) for n in names) + 2
-        tail = "      min" + ("  verdict" if not args.no_robust else "")
+        tail = "      min" + ("  verdict" if robust else "")
         print("variant".ljust(width) + " ".join(h.rjust(12) for h in heads) + tail)
         for name in names:
             pfs = [results[k][name]["PF"] for k in results]
             line = name.ljust(width) + " ".join(f"{pf:12.2f}" for pf in pfs) + f" {min(pfs):8.2f}"
-            if not args.no_robust:
+            if robust:
                 cells = [results[k][name]["_robust"] for k in results]
                 line += "  " + robustness.verdict(cells, n_tests=total)
             print(line)
-        if not args.no_robust:
+        if robust:
             print(
                 "\nverdict: PASS = every column has PF95%lo > 1, p_perm below the corrected bar"
                 "\nand >= 60% of calendar folds profitable. WATCH = positive expectancy and"
