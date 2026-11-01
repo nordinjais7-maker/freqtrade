@@ -876,6 +876,30 @@ python user_data/scripts/sessionsweep_variants.py --strategy SessionSweep1h --re
 python user_data/scripts/sessionsweep_variants.py --strategy SessionSweep1h --regime-set --pair ETH/USDT:USDT --timerange 20241031-20251031 20251031-20261031
 ```
 
+### Regime-gate test result (2026-11-01): all four candidates fail
+
+Pass mark: PF > 1.10 in every unseen column with >= 30 trades.
+
+| Candidate | SUI 2023-24 | ETH 2024-25 | ETH 2025-26 | Min | Trades |
+|---|---|---|---|---|---|
+| rg_risk1 | 0.99 | 0.78 | 0.74 | 0.74 | 106 / 108 / 86 |
+| rg_first_sweep | 0.93 | 0.87 | 0.78 | 0.78 | 100 / 102 / 76 |
+| rg_retest | 0.83 | 0.64 | 0.73 | 0.64 | 100 / 97 / 71 |
+| rg_timestop6h | 1.03 | 0.78 | 0.59 | 0.59 | 108 / 117 / 89 |
+
+* The bull-regime effect did **not** replicate: SUI 2023-24 bull-bucket PF was
+  0.82-1.03 (vs 1.07-2.01 in the two years it was found in), and ETH's bull bucket
+  was worse than its chop bucket in both years (0.64-0.87 vs ~1.0).
+* Every permutation p-value is above 0.45 and every bootstrap PF band includes
+  values below 1. The gate does halve trade count and drawdown, but it does not
+  create an edge.
+* Data note: ETH data starts 2024-10-20, so the gated ETH 2024-25 column began
+  ~20 days late (gated n 108 vs 110 ungated bull trades; 4 folds instead of 5).
+  Too small to change the verdict.
+
+Verdict: hypothesis rejected. Per the pre-registration, no further regime
+variants on this data.
+
 ## 6. Suggested next tests
 
 1. **Done: out-of-sample check of the trend filter.** It failed (section 4), so the
