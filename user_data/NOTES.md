@@ -378,6 +378,40 @@ minimum PF across all four columns is above 1.10.** Picking the best single
 column would be the same mistake as before. The variants were chosen before any
 of these results were seen; do not add new ones after looking.
 
+### Enhancement results: all fail the pass rule
+
+Profit factor, 1% risk per trade, run on the Mac:
+
+| Variant | SUI 2024-25 | SUI 2025-26 | BTC 2024-25 | BTC 2025-26 | Min |
+|---|---|---|---|---|---|
+| risk1 (control) | 0.82 | 1.06 | 0.85 | 0.71 | 0.71 |
+| risk1_first_sweep | 0.67 | 1.00 | 0.83 | 0.70 | 0.67 |
+| risk1_mss | 0.88 | 1.08 | 0.82 | 0.73 | 0.73 |
+| risk1_displacement | 1.00 | 1.07 | 0.92 | 0.81 | **0.81** |
+| risk1_retest | 0.70 | 1.14 | 0.85 | 0.73 | 0.70 |
+| risk1_compression | 0.73 | 1.05 | 0.74 | 0.69 | 0.69 |
+| risk1_timestop6h | 0.80 | 1.07 | 0.77 | 0.63 | 0.63 |
+| risk1_confluence | 0.92 | 1.26 | 0.87 | 0.69 | 0.69 |
+
+The pass mark was a minimum above 1.10. The best is 0.81, so **no enhancement
+passes**. Every variant except one is profitable only on SUI 2025-26, the year the
+strategy was first built on.
+
+Two things are still worth knowing:
+
+* **Displacement is the one consistent improvement.** It beats the control in all
+  four columns (by 0.01 to 0.18 PF). The reclaim candle's strength carries real
+  information, but not enough to make the strategy profitable.
+* **Fees matter more than they look.** The control has a lower PF than the
+  original full-balance baseline (0.82 vs 0.92 on SUI 2024-25) because risk
+  sizing puts the largest positions on the tightest stops, where the 0.1%
+  round-trip fee is the biggest share of the risk. A setup with a stop under
+  about 1% has to clear roughly a 10% fee hurdle before it earns anything.
+
+**Final conclusion:** across 2 pairs, 2 years and 31 rule sets, the Asia-range
+sweep-and-reclaim idea does not show an edge on 5m Binance perpetuals. This
+branch is best kept as a testing harness rather than as a strategy to trade.
+
 ## 5. Comparing variants in one go
 
 `user_data/scripts/sessionsweep_variants.py` runs a set of variants and prints one
