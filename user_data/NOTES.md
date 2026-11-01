@@ -8,6 +8,8 @@ Session-timing liquidity-sweep strategy for Freqtrade, built for
 | `user_data/strategies/SessionSweep.py` | The sweep-and-reclaim strategy (all logic + parameters, heavily commented) |
 | `user_data/strategies/SessionMomentum.py` | The Asia-range breakout momentum strategy (section 4e) |
 | `user_data/strategies/SessionSweep1h.py`, `SessionMomentum1h.py` | The same two strategies on 1-hour candles (section 4f) |
+| `user_data/strategies/SuiFlushShort.py`, `config_suiflush.json` | The uploaded SUI flush-short playbook port, reviewed and extended (section 4g) |
+| `user_data/scripts/fetch_okx_flow.py`, `fetch_binance_flow.py` | Hourly long/short-ratio + open-interest history from OKX (~60 days) or Binance (years) |
 | `user_data/config_sessionsweep.json` | Futures / isolated / dry-run config, 1 open trade, **API keys are placeholders** |
 | `user_data/scripts/sessionsweep_backtest.sh` | Exact download + backtest + session-split commands for your Mac |
 | `user_data/scripts/sessionsweep_variants.py` | Runs a batch of parameter variants and prints one comparison table |
@@ -771,6 +773,93 @@ Neither fading nor trading the break of the Asia session range on Binance
 perpetuals produced an edge that survives a change of year or pair. The code
 is a working, verified research harness; none of the strategies should be run
 with money.
+
+## 4g. SuiFlushShort: the uploaded "SUI Flush Playbook" port (deep review)
+
+Supplied as `freqtrade_sui_flush.zip` and now in the repo as
+`user_data/strategies/SuiFlushShort.py`, `user_data/scripts/fetch_okx_flow.py`
+and `user_data/config_suiflush.json` (credentials are placeholders).
+
+**The rules** (15m, short only): first 15m close below the prior 6h low while OKX's
+long/short *account* ratio is ≥ 2.6 (crowded longs); skip if open interest rose ≥ 1%
+in 4h while the ratio rose over 2h; optional BTC-also-breaking filter. Stop 0.2%
+above max(break-candle high, broken low). Half off at 1R and stop to breakeven,
+rest at 2R, cover on a reclaim of the lowest-low candle's high within 4 candles,
+time stops at 2h (no T1) and 4h. 1% of equity at risk, half on weekends, 5× isolated.
+Playbook claim: +0.47R per trade before fees on 78 trades, Aug–Nov 2026, OKX data.
+
+### Review findings
+
+* **The code is sound.** Flow rows are only used after their hour closes (verified:
+  the merged ratio on every entry equals the last *closed* hour's value). The
+  structural stop, sizing, partial exit and reclaim logic do what the README says.
+* **Backtest fidelity gap (fixed).** Freqtrade evaluates `adjust_trade_position` and
+  `custom_exit` at each candle's *open*, so the author's 1R and 2R targets could
+  only fire when a later candle opened past them. T2 is now a `custom_roi`, which
+  Freqtrade checks against the candle's low, so it fills intra-candle. T1 and the
+  reclaim still need `--timeframe-detail 1m`, as the README says.
+* **The data is the problem, not the code.** OKX keeps about 60 days of hourly
+  ratio history. A 78-trade sample from one falling quarter, in a short-only
+  strategy, cannot be told apart from "shorting SUI in a bear market worked".
+  Binance publishes the same metric back to 2021 (`data.binance.vision`, 5-minute
+  samples), so `fetch_binance_flow.py` builds a multi-year hourly file and the
+  strategy gained `flow_source = binance` (with a matching live refresh) and
+  `ls_mode = percentile` (ratio above its own rolling 80th percentile), because
+  Binance's ratio reads lower than OKX's and an absolute 2.6 would not transfer.
+* **Fees matter.** The stop is ~1% of price, so the 0.1% round-trip fee is ~0.1R
+  per trade and funding on a 5× short adds to it. The playbook's +0.47R is before
+  both; Freqtrade's backtest includes both.
+* Research parameters added (defaults unchanged): lookback, stop buffer, T1/T2
+  multiples, reclaim window, time stops, risk, leverage, all switchable.
+
+Verified on synthetic data: every entry is a first break with ratio ≥ threshold
+and not disarmed; stops fill exactly at the structural level; 16 of 78 trades took
+the T1 partial; T2 fills within 0.1% of 2R; risk is 0.99% of equity on weekdays
+and 0.49% on weekends; no entries when the flow file is missing; percentile mode
+and the Binance file parser work (24 hourly rows from 288 five-minute samples,
+labelled with the hour start).
+
+### Pre-registered test (written before any real result)
+
+1. **Replication** (sanity, not pass/fail): OKX flow, defaults, over the ~60 days
+   the OKX file covers, with 1m detail. Compare with the playbook's numbers.
+2. **Main test**: Binance flow, percentile 80, two years of SUI
+   (2024-11 → 2025-10 and 2025-11 → 2026-10), 1m detail.
+   **Pass = PF > 1.10 in both years, ≥ 30 trades per year, robustness verdict at
+   least WATCH.** Named secondary candidates: percentile 90 and absolute 2.0.
+3. **The control** `f_bin_noflow` (same entries without the ratio filter) must be
+   clearly worse than the main candidate in both years, or the filter is not the edge.
+4. If it passes: 4-week dry run with the OKX source (the live default), nothing live.
+
+Commands on the Mac, one at a time. Data: 15m and 1m candles for SUI and BTC
+(1m is large: about 1 GB for two pairs over two years, allow 15 minutes):
+
+```bash
+freqtrade download-data -c user_data/config_suiflush.json --userdir user_data --pairs "SUI/USDT:USDT" "BTC/USDT:USDT" --timeframes 15m 1m --trading-mode futures --timerange 20241020-20261031
+```
+
+```bash
+python user_data/scripts/fetch_okx_flow.py
+```
+
+```bash
+python user_data/scripts/fetch_binance_flow.py --symbol SUIUSDT --start 2024-10-20 --end 2026-10-31
+```
+
+Replication over the OKX window (adjust the start to the first date the OKX
+fetch printed):
+
+```bash
+python user_data/scripts/sessionsweep_variants.py --strategy SuiFlushShort --only f_okx_default --timeframe-detail 1m --pair SUI/USDT:USDT --timerange 20260903-20261031
+```
+
+Main test, all 15 variants, about 20 minutes per year with 1m detail:
+
+```bash
+python user_data/scripts/sessionsweep_variants.py --strategy SuiFlushShort --only f_bin_pct80 f_bin_pct90 f_bin_abs2.0 f_bin_noflow --timeframe-detail 1m --pair SUI/USDT:USDT --timerange 20241031-20251031 20251031-20261031
+```
+
+Then, only if something passes, the remaining variants to see which rules carry it.
 
 ## 5. Comparing variants in one go
 

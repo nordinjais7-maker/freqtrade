@@ -74,6 +74,23 @@ def write_data(datadir: Path, days: int, seed: int) -> None:
     df5.to_feather(fut / f"{PAIR_FILE}-5m-futures.feather")
     df1h.to_feather(fut / f"{PAIR_FILE}-1h-futures.feather")
     resample(df5, "4h").to_feather(fut / f"{PAIR_FILE}-4h-futures.feather")
+    resample(df5, "15min").to_feather(fut / f"{PAIR_FILE}-15m-futures.feather")
+    # A second synthetic pair (BTC-like price level) for strategies with a BTC informative.
+    btc5 = make_synthetic(days, seed + 1, start)
+    for c in ("open", "high", "low", "close"):
+        btc5[c] = btc5[c] * 40000
+    resample(btc5, "15min").to_feather(fut / "BTC_USDT_USDT-15m-futures.feather")
+    # Synthetic hourly flow (long/short ratio + open interest) in the okx_flow schema,
+    # for SuiFlushShort smoke tests (set SUIFLUSH_FLOW_FILE to this path).
+    flow_dir = datadir / "okx_flow"
+    flow_dir.mkdir(parents=True, exist_ok=True)
+    rng = np.random.default_rng(seed + 2)
+    hours = df1h["date"]
+    ls = 2.3 + 0.7 * np.sin(np.arange(len(hours)) / 9.0) + rng.normal(0, 0.15, len(hours))
+    oi = np.exp(np.cumsum(rng.normal(0, 0.004, len(hours)))) * 1e8
+    pd.DataFrame({"date": hours, "ls": ls, "oi": oi}).to_feather(
+        flow_dir / "SUI-USDT-SWAP_1H.feather"
+    )
     # Mark price ~ last price; funding every 8h at a small positive rate.
     df1h.to_feather(fut / f"{PAIR_FILE}-1h-mark.feather")
     fr = df1h[df1h["date"].dt.hour % 8 == 0].copy()
@@ -86,42 +103,46 @@ def write_data(datadir: Path, days: int, seed: int) -> None:
 
 
 def fake_markets() -> dict:
+    sui = _market(PAIR, "SUIUSDT", "SUI", 4)
+    btc = _market("BTC/USDT:USDT", "BTCUSDT", "BTC", 1)
+    return {PAIR: sui, "BTC/USDT:USDT": btc}
+
+
+def _market(symbol: str, market_id: str, base: str, price_precision: int) -> dict:
     return {
-        PAIR: {
-            "id": "SUIUSDT",
-            "symbol": PAIR,
-            "base": "SUI",
-            "quote": "USDT",
-            "settle": "USDT",
-            "baseId": "SUI",
-            "quoteId": "USDT",
-            "settleId": "USDT",
-            "type": "swap",
-            "spot": False,
-            "margin": False,
-            "swap": True,
-            "future": False,
-            "option": False,
-            "active": True,
-            "contract": True,
-            "linear": True,
-            "inverse": False,
-            "taker": 0.0005,
-            "maker": 0.0002,
-            "contractSize": 1.0,
-            "expiry": None,
-            "expiryDatetime": None,
-            "strike": None,
-            "optionType": None,
-            "precision": {"amount": 1, "price": 4, "base": 8, "quote": 8},
-            "limits": {
-                "leverage": {"min": 1, "max": 75},
-                "amount": {"min": 0.1, "max": 10000000},
-                "price": {"min": 0.0001, "max": 10000},
-                "cost": {"min": 5, "max": None},
-            },
-            "info": {},
-        }
+        "id": market_id,
+        "symbol": symbol,
+        "base": base,
+        "quote": "USDT",
+        "settle": "USDT",
+        "baseId": base,
+        "quoteId": "USDT",
+        "settleId": "USDT",
+        "type": "swap",
+        "spot": False,
+        "margin": False,
+        "swap": True,
+        "future": False,
+        "option": False,
+        "active": True,
+        "contract": True,
+        "linear": True,
+        "inverse": False,
+        "taker": 0.0005,
+        "maker": 0.0002,
+        "contractSize": 1.0,
+        "expiry": None,
+        "expiryDatetime": None,
+        "strike": None,
+        "optionType": None,
+        "precision": {"amount": 1, "price": price_precision, "base": 8, "quote": 8},
+        "limits": {
+            "leverage": {"min": 1, "max": 75},
+            "amount": {"min": 0.1, "max": 10000000},
+            "price": {"min": 0.0001, "max": 10000},
+            "cost": {"min": 5, "max": None},
+        },
+        "info": {},
     }
 
 

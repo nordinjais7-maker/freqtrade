@@ -40,7 +40,9 @@ import robustness
 
 
 CONFIG = "user_data/config_sessionsweep.json"
+CONFIGS = {"SuiFlushShort": "user_data/config_suiflush.json"}  # others use CONFIG
 RESULTS_DIR = Path("user_data/backtest_results")
+TIMEFRAME_DETAIL = ""  # set from --timeframe-detail
 # Set from --strategy in main(); SessionSweep variants are the module-level tables,
 # SessionMomentum variants live in MOMENTUM_VARIANTS.
 STRATEGY = "SessionSweep"
@@ -239,6 +241,33 @@ MOMENTUM_VARIANTS: dict[str, dict] = {
 }  # fmt: skip
 MOMENTUM_SET = list(MOMENTUM_VARIANTS)
 
+# ---------------------------------------------------------------------------
+# SuiFlushShort (short the 15m break of the prior 6h low while longs are
+# crowded). Defaults = the playbook with OKX flow. The "bin_" rows use Binance's
+# long/short history (years, via fetch_binance_flow.py) with a percentile
+# threshold, which is the pre-registered main test; "noflow" is the control
+# that checks the playbook's claim that the L/S filter is the edge.
+# ---------------------------------------------------------------------------
+_BIN = {"flow_source": "binance", "ls_mode": "percentile", "ls_pct": 0.8}
+FLUSH_VARIANTS: dict[str, dict] = {
+    "f_okx_default": {},
+    "f_bin_pct80": {"sell": {**_BIN}},
+    "f_bin_pct90": {"sell": {**_BIN, "ls_pct": 0.9}},
+    "f_bin_pct70": {"sell": {**_BIN, "ls_pct": 0.7}},
+    "f_bin_abs2.0": {"sell": {"flow_source": "binance", "ls_mode": "absolute", "ls_min": 2.0}},
+    "f_bin_abs2.3": {"sell": {"flow_source": "binance", "ls_mode": "absolute", "ls_min": 2.3}},
+    "f_bin_noflow": {"sell": {**_BIN, "require_flow": False}},
+    "f_bin_pct80_nodisarm": {"sell": {**_BIN, "disarm_crowded": False}},
+    "f_bin_pct80_btc": {"sell": {**_BIN, "use_btc_filter": True}},
+    "f_bin_pct80_lb16": {"buy": {"lookback_bars": 16}, "sell": {**_BIN}},
+    "f_bin_pct80_lb48": {"buy": {"lookback_bars": 48}, "sell": {**_BIN}},
+    "f_bin_pct80_t2_3": {"sell": {**_BIN, "t2_r": 3.0}},
+    "f_bin_pct80_noT1": {"sell": {**_BIN, "use_t1": False}},
+    "f_bin_pct80_noreclaim": {"sell": {**_BIN, "use_reclaim_exit": False}},
+    "f_bin_pct80_notime": {"sell": {**_BIN, "time_stop_t1_hours": 0, "time_stop_max_hours": 0}},
+}  # fmt: skip
+FLUSH_SET = list(FLUSH_VARIANTS)
+
 TIMING_SET = [
     "t_base", "t_asia01_08", "t_asia00_08", "t_london_07_09", "t_london_08_11",
     "t_ny_1230_1430", "t_ny_1330_1600", "t_ny_1430_1700", "t_london_only", "t_ny_only",
@@ -264,6 +293,8 @@ def run_backtest(timerange: str, label: str, pair: str) -> Path:
         "--export", "signals",
         "--notes", f"variant {label}",
     ]  # fmt: skip
+    if TIMEFRAME_DETAIL:
+        cmd += ["--timeframe-detail", TIMEFRAME_DETAIL]
     proc = subprocess.run(cmd, check=False, capture_output=True, text=True)
     if proc.returncode != 0:
         print(proc.stdout[-3000:], proc.stderr[-3000:], sep="\n")
@@ -382,19 +413,28 @@ def main() -> None:
     )
     p.add_argument(
         "--strategy", default="SessionSweep",
-        choices=["SessionSweep", "SessionMomentum", "SessionSweep1h", "SessionMomentum1h"],
+        choices=["SessionSweep", "SessionMomentum", "SessionSweep1h", "SessionMomentum1h",
+                 "SuiFlushShort"],
         help="which strategy's variant table to use (default SessionSweep)",
+    )  # fmt: skip
+    p.add_argument(
+        "--timeframe-detail", default="",
+        help="pass a detail timeframe (e.g. 1m) to backtesting for intra-candle exits",
     )  # fmt: skip
     p.add_argument(
         "--no-robust", action="store_true",
         help="skip the permutation / bootstrap / fold / regime robustness tables",
     )  # fmt: skip
     args = p.parse_args()
-    global STRATEGY, PARAM_FILE, VARIANTS
+    global STRATEGY, PARAM_FILE, VARIANTS, CONFIG, TIMEFRAME_DETAIL
     STRATEGY = args.strategy
     PARAM_FILE = Path(f"user_data/strategies/{STRATEGY}.json")
+    CONFIG = CONFIGS.get(STRATEGY, CONFIG)
+    TIMEFRAME_DETAIL = args.timeframe_detail
     if STRATEGY.startswith("SessionMomentum"):
         VARIANTS = MOMENTUM_VARIANTS
+    elif STRATEGY == "SuiFlushShort":
+        VARIANTS = FLUSH_VARIANTS
 
     if not Path(CONFIG).is_file():
         raise SystemExit("Run this from the freqtrade repository root.")
@@ -411,8 +451,8 @@ def main() -> None:
         "timing_set": TIMING_SET, "htf_set": HTF_SET,
     }  # fmt: skip
     chosen = [v for k, v in sets.items() if getattr(args, k)]
-    if STRATEGY.startswith("SessionMomentum") and chosen:
-        sys.exit("The --*-set options are SessionSweep tables; use --only or no set for momentum.")
+    if not STRATEGY.startswith("SessionSweep") and chosen:
+        sys.exit("The --*-set options are SessionSweep tables; use --only or no set here.")
     names = args.only or (chosen[0] if chosen else list(VARIANTS))
     unknown = [n for n in names if n not in VARIANTS]
     if unknown:
