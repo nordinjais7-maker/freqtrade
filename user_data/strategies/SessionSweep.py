@@ -26,6 +26,13 @@ Enhancements (all OFF by default, so the defaults reproduce the original rules):
   * max_asia_adr_ratio      - only trade days where the Asia range is compressed
                               relative to the average daily range
   * max_trade_hours         - close trades that have not resolved in N hours
+  * entry_mode "breakout"   - sweep -> reclaim -> close through the post-reclaim
+                              swing (break-down / break-out) within confirm_window;
+                              the entry fires on the break, not on the reclaim
+  * tp_mode "resistance"    - target the nearer of the Asia-range target and the
+                              previous day's extreme (support / resistance)
+  * flush_atr_mult          - after a flush candle in our favour, exit on the first
+                              opposite-colour candle (momentum exhaustion exit)
 
 All session windows and thresholds are strategy parameters, so they can be
 overridden from `SessionSweep.json` next to this file, from the `strategy`
@@ -49,6 +56,7 @@ from pandas import DataFrame
 from freqtrade.persistence import Trade
 from freqtrade.strategy import (
     BooleanParameter,
+    CategoricalParameter,
     DecimalParameter,
     IntParameter,
     IStrategy,
@@ -200,6 +208,25 @@ class SessionSweep(IStrategy):
     # Time stop: close a trade still open after this many hours. 0 = off.
     max_trade_hours = IntParameter(0, 48, default=0, space="sell", optimize=False)
 
+    # Entry model. "reclaim" = original (enter on the close back inside the range).
+    # "breakout" = after the reclaim, wait up to `confirm_window` candles for a
+    # close below the post-reclaim swing low (short) / above the swing high (long).
+    entry_mode = CategoricalParameter(
+        ["reclaim", "breakout"], default="reclaim", space="buy", optimize=False
+    )
+    confirm_window = IntParameter(2, 24, default=6, space="buy", optimize=False)
+    # Target model. "range" = tp_range_fraction of the Asia range (0.5 and 0.618
+    # are the Fibonacci targets). "resistance" = the nearer of that and the previous
+    # day's low (short) / high (long), when that level sits between entry and target.
+    tp_mode = CategoricalParameter(
+        ["range", "resistance"], default="range", space="sell", optimize=False
+    )
+    # Flush exit: once a closed candle since entry has a body >= N x ATR in our
+    # favour, exit at the next open after the first opposite-colour candle. 0 = off.
+    flush_atr_mult = DecimalParameter(
+        0.0, 4.0, default=0.0, decimals=2, space="sell", optimize=False
+    )
+
     # ------------------------------------------------------------------ #
     # Parameters - leverage
     # ------------------------------------------------------------------ #
@@ -302,6 +329,19 @@ class SessionSweep(IStrategy):
         adr = daily_range_pct.shift(1).rolling(14, min_periods=5).mean()
         dataframe["adr_pct"] = day.map(adr).to_numpy()
 
+        # Previous completed day's extremes (support / resistance targets).
+        dataframe["prev_day_high"] = day.map(daily["d_high"].shift(1)).to_numpy()
+        dataframe["prev_day_low"] = day.map(daily["d_low"].shift(1)).to_numpy()
+
+        # Breakout model inputs: swing over the confirmation window (excluding the
+        # current candle) and a sweep window long enough to still contain the
+        # wick when the break happens up to `confirm_window` candles later.
+        cw = int(self.confirm_window.value)
+        dataframe["cw_low_prev"] = dataframe["low"].shift(1).rolling(cw, min_periods=1).min()
+        dataframe["cw_high_prev"] = dataframe["high"].shift(1).rolling(cw, min_periods=1).max()
+        dataframe["sweep_high_ext"] = post_asia_high.rolling(lb + cw, min_periods=1).max()
+        dataframe["sweep_low_ext"] = post_asia_low.rolling(lb + cw, min_periods=1).min()
+
         return dataframe
 
     # ================================================================== #
@@ -358,12 +398,47 @@ class SessionSweep(IStrategy):
         short_edge = raw_short & ~raw_short.shift(1, fill_value=False)
         long_edge = raw_long & ~raw_long.shift(1, fill_value=False)
 
+        sweep_high_col, sweep_low_col = "sweep_high", "sweep_low"
+        if self.entry_mode.value == "breakout":
+            # Armed = a reclaim happened within the last `confirm_window` candles.
+            # Entry = first close through the swing formed since then, while still
+            # inside the Asia range and inside a tradable session.
+            cw = int(self.confirm_window.value)
+            armed_short = short_edge.rolling(cw, min_periods=1).max().astype(bool)
+            armed_long = long_edge.rolling(cw, min_periods=1).max().astype(bool)
+            brk_short = (
+                armed_short
+                & session_ok
+                & (dataframe["close"] < dataframe["cw_low_prev"])
+                & (dataframe["close"] < dataframe["asia_high"])
+            )
+            brk_long = (
+                armed_long
+                & session_ok
+                & (dataframe["close"] > dataframe["cw_high_prev"])
+                & (dataframe["close"] > dataframe["asia_low"])
+            )
+            short_edge = brk_short & ~brk_short.shift(1, fill_value=False)
+            long_edge = brk_long & ~brk_long.shift(1, fill_value=False)
+            sweep_high_col, sweep_low_col = "sweep_high_ext", "sweep_low_ext"
+
         # --- Risk geometry (price terms) ----------------------------------
         asia_range = dataframe["asia_high"] - dataframe["asia_low"]
-        short_stop = dataframe["sweep_high"] * (1 + buf)
-        long_stop = dataframe["sweep_low"] * (1 - buf)
+        short_stop = dataframe[sweep_high_col] * (1 + buf)
+        long_stop = dataframe[sweep_low_col] * (1 - buf)
         short_tp = dataframe["asia_high"] - asia_range * tp_frac
         long_tp = dataframe["asia_low"] + asia_range * tp_frac
+        if self.tp_mode.value == "resistance":
+            # Use the previous day's extreme instead when it is nearer than the
+            # range target but still at least 0.1% away from the current price.
+            pdl = dataframe["prev_day_low"].where(
+                dataframe["prev_day_low"] < dataframe["close"] * 0.999
+            )
+            pdh = dataframe["prev_day_high"].where(
+                dataframe["prev_day_high"] > dataframe["close"] * 1.001
+            )
+            short_tp = np.fmax(short_tp, pdl)
+            long_tp = np.fmin(long_tp, pdh)
 
         # Planned entry: signal close, or a retest limit part-way back to the level.
         frac = float(self.entry_retrace_frac.value)
@@ -627,6 +702,34 @@ class SessionSweep(IStrategy):
             return None  # TP already behind us - let stop / time handle it
         return dist * trade.leverage
 
+    def _flush_reversal(self, pair: str, trade: Trade, current_time: datetime) -> bool:
+        """True when a closed candle since entry was a flush in our favour and the
+        most recent closed candle is the first one against us since that flush."""
+        dataframe, _ = self.dp.get_analyzed_dataframe(pair, self.timeframe)
+        if dataframe is None or dataframe.empty:
+            return False
+        since = dataframe.loc[
+            (dataframe["date"] >= trade.open_date_utc) & (dataframe["date"] < current_time)
+        ]
+        if len(since) < 2:
+            return False
+        body = since["close"] - since["open"]
+        sign = -1.0 if trade.is_short else 1.0
+        flush = (sign * body) >= float(self.flush_atr_mult.value) * since["atr"]
+        if not flush.any():
+            return False
+        last_flush_pos = int(np.flatnonzero(flush.to_numpy())[-1])
+        last_body = float(body.iloc[-1])
+        # Opposite-colour candle after the flush, and it is the first such candle.
+        after = body.iloc[last_flush_pos + 1 :]
+        against = (sign * after) < 0
+        return (
+            bool(against.any())
+            and bool(against.iloc[-1])
+            and int(against.sum()) == 1
+            and (sign * last_body < 0)
+        )
+
     def custom_exit(
         self,
         pair: str,
@@ -636,10 +739,12 @@ class SessionSweep(IStrategy):
         current_profit: float,
         **kwargs,
     ) -> str | None:
-        """Optional time stop and time-based flatten at the end of the trading day."""
+        """Time stop, flush-reversal exit, and end-of-day flatten (all optional)."""
         max_hours = int(self.max_trade_hours.value)
         if max_hours > 0 and current_time - trade.open_date_utc >= timedelta(hours=max_hours):
             return "time_stop"
+        if float(self.flush_atr_mult.value) > 0 and self._flush_reversal(pair, trade, current_time):
+            return "flush_reversal"
         if not self.exit_at_session_end.value:
             return None
         mod = current_time.hour * 60 + current_time.minute

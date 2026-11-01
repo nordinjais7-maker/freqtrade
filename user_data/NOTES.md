@@ -9,6 +9,7 @@ Session-timing liquidity-sweep strategy for Freqtrade, built for
 | `user_data/config_sessionsweep.json` | Futures / isolated / dry-run config, 1 open trade, **API keys are placeholders** |
 | `user_data/scripts/sessionsweep_backtest.sh` | Exact download + backtest + session-split commands for your Mac |
 | `user_data/scripts/sessionsweep_variants.py` | Runs a batch of parameter variants and prints one comparison table |
+| `user_data/scripts/sessionsweep_timing.py` | Hour / session / weekday / exit / hold-time breakdown of a backtest result |
 | `user_data/scripts/sessionsweep_smoke_backtest.py` | Offline plumbing test on synthetic candles (no network needed) |
 | `user_data/NOTES.md` | This file |
 
@@ -412,6 +413,56 @@ Two things are still worth knowing:
 sweep-and-reclaim idea does not show an edge on 5m Binance perpetuals. This
 branch is best kept as a testing harness rather than as a strategy to trade.
 
+## 4c. Breakout-confirmation entry model, targets, flush exit, timing
+
+Requested after the enhancement round. Everything is off by default, so all the
+results above still reproduce (verified: identical trade list with defaults).
+
+| Parameter | Default | Effect when on |
+|---|---|---|
+| `entry_mode` | `reclaim` | `breakout`: sweep → reclaim → wait up to `confirm_window` candles for a close *below* the post-reclaim swing low (short) or *above* the swing high (long). The entry fires on that break-down / break-out candle. Stop stays beyond the sweep wick (window extended so the wick is still in view). |
+| `confirm_window` | 6 | Candles allowed between reclaim and break |
+| `tp_range_fraction` | 1.0 | Already the Fibonacci target: 0.5 = 50%, 0.618 = 61.8% of the Asia range from the swept level |
+| `tp_mode` | `range` | `resistance`: use the previous day's low (short) / high (long) when it sits between entry and the range target, i.e. the nearer support/resistance |
+| `flush_atr_mult` | 0 | After a closed candle since entry with body ≥ N × ATR(14) in our favour (a flush down / push up), exit at the next open after the **first opposite-colour candle** |
+
+Verified on synthetic data: breakout entries all follow a reclaim within the
+window and all close through the swing; resistance targets are never further
+than the range target and changed 51 of 338 signals; the flush exit fired on 17
+of 214 trades with a small positive average.
+
+### How to test it
+
+Entry-model variants (9 variants, about 36 minutes for both pairs and years):
+
+```bash
+python user_data/scripts/sessionsweep_variants.py --entry-set --pair SUI/USDT:USDT BTC/USDT:USDT --timerange 20241031-20251031 20251031-20261031
+```
+
+`brk_all_signals` is the full model: breakout entry, displacement ≥ 0.8 ATR,
+61.8% / resistance target, flush exit, 8-hour time stop, 1% risk. `risk1` is the
+control. Same pass rule as before: **minimum PF across the four columns above 1.10.**
+
+Session-timing variants on the full model (12 variants, about 48 minutes):
+
+```bash
+python user_data/scripts/sessionsweep_variants.py --timing-set --pair SUI/USDT:USDT BTC/USDT:USDT --timerange 20241031-20251031 20251031-20261031
+```
+
+They move the Asia window (00–07, 00–08, 01–08), narrow London (07–09, 08–11),
+narrow NY (12:30–14:30, 13:30–16:00, 14:30–17:00), isolate each session, and
+flatten at 17:00 or 21:00 UTC. The Asia window cannot cross midnight.
+
+Hour-by-hour breakdown of any backtest (entry hour, session, weekday, exit
+reason, holding time):
+
+```bash
+python user_data/scripts/sessionsweep_timing.py
+```
+
+A timing effect is real only if the same hours win on both pairs and both years;
+a cell with fewer than about 30 trades is noise.
+
 ## 5. Comparing variants in one go
 
 `user_data/scripts/sessionsweep_variants.py` runs a set of variants and prints one
@@ -421,9 +472,10 @@ compact table with the London / NY split. It needs data that is already download
 python user_data/scripts/sessionsweep_variants.py
 ```
 
-The full set has 24 variants and takes about 24 minutes per pair/year. `--trend-set`
+The full set has 44 variants and takes about 44 minutes per pair/year. `--trend-set`
 runs the six trend-filter variants, `--enhance-set` the eight structural
-enhancements. `--pair` and `--timerange` accept several values; with more than one
+enhancements, `--entry-set` the nine breakout-entry variants, `--timing-set` the
+twelve session-window variants. `--pair` and `--timerange` accept several values; with more than one
 combination the script prints a profit-factor grid at the end. Use `--only` to pick
 specific variants.
 

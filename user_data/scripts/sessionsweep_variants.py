@@ -85,6 +85,69 @@ ENHANCE_SET = [
     "risk1_compression", "risk1_timestop6h", "risk1_confluence",
 ]  # fmt: skip
 
+# Breakout-confirmation entry model with Fibonacci / resistance targets and the
+# flush-reversal exit. All at 1% risk. "brk_all_signals" is the full model:
+# sweep -> reclaim -> displacement -> structure break, 61.8% or resistance target,
+# flush exit, 8h time stop.
+BRK = {**RISK, "entry_mode": "breakout"}
+VARIANTS.update(
+    {
+        "brk": {"buy": {**BRK}},
+        "brk_fib50": {"buy": {**BRK}, "sell": {"tp_range_fraction": 0.5}},
+        "brk_fib618": {"buy": {**BRK}, "sell": {"tp_range_fraction": 0.618}},
+        "brk_resistance": {"buy": {**BRK}, "sell": {"tp_mode": "resistance"}},
+        "brk_flush": {"buy": {**BRK}, "sell": {"flush_atr_mult": 1.0}},
+        "brk_disp_flush": {
+            "buy": {**BRK, "displacement_atr_mult": 0.8}, "sell": {"flush_atr_mult": 1.0},
+        },
+        "brk_all_signals": {
+            "buy": {**BRK, "displacement_atr_mult": 0.8},
+            "sell": {"tp_mode": "resistance", "tp_range_fraction": 0.618,
+                     "flush_atr_mult": 1.0, "max_trade_hours": 8},
+        },
+        "reclaim_fib618_flush": {
+            "buy": {**RISK}, "sell": {"tp_range_fraction": 0.618, "flush_atr_mult": 1.0},
+        },
+    }
+)  # fmt: skip
+ENTRY_SET = [
+    "risk1", "brk", "brk_fib50", "brk_fib618", "brk_resistance", "brk_flush",
+    "brk_disp_flush", "brk_all_signals", "reclaim_fib618_flush",
+]  # fmt: skip
+
+# Session-timing variants, all on the full breakout model. Windows are minutes
+# after 00:00 UTC. The Asia window must not cross midnight (ranges are per UTC day).
+T_BUY = {**BRK, "displacement_atr_mult": 0.8}
+T_SELL = {"tp_mode": "resistance", "tp_range_fraction": 0.618, "flush_atr_mult": 1.0,
+          "max_trade_hours": 8}  # fmt: skip
+
+
+def _t(**over):
+    return {"buy": {**T_BUY, **over.get("buy", {})}, "sell": {**T_SELL, **over.get("sell", {})}}
+
+
+VARIANTS.update(
+    {
+        "t_base": _t(),
+        "t_asia01_08": _t(buy={"asia_start_min": 60, "asia_end_min": 480, "london_start_min": 480}),
+        "t_asia00_08": _t(buy={"asia_end_min": 480, "london_start_min": 480}),
+        "t_london_07_09": _t(buy={"london_end_min": 540}),
+        "t_london_08_11": _t(buy={"london_start_min": 480, "london_end_min": 660}),
+        "t_ny_1230_1430": _t(buy={"ny_end_min": 870}),
+        "t_ny_1330_1600": _t(buy={"ny_start_min": 810, "ny_end_min": 960}),
+        "t_ny_1430_1700": _t(buy={"ny_start_min": 870}),
+        "t_london_only": _t(buy={"trade_ny": False}),
+        "t_ny_only": _t(buy={"trade_london": False}),
+        "t_flat_1700": _t(sell={"exit_at_session_end": True}),
+        "t_flat_2100": _t(sell={"exit_at_session_end": True, "flat_time_min": 1260}),
+    }
+)  # fmt: skip
+TIMING_SET = [
+    "t_base", "t_asia01_08", "t_asia00_08", "t_london_07_09", "t_london_08_11",
+    "t_ny_1230_1430", "t_ny_1330_1600", "t_ny_1430_1700", "t_london_only", "t_ny_only",
+    "t_flat_1700", "t_flat_2100",
+]  # fmt: skip
+
 
 def default_timerange() -> str:
     end = datetime.now(UTC).date()
@@ -182,6 +245,8 @@ def main() -> None:
     p.add_argument(
         "--enhance-set", action="store_true", help="run the structural-enhancement variants"
     )
+    p.add_argument("--entry-set", action="store_true", help="run the breakout-entry variants")
+    p.add_argument("--timing-set", action="store_true", help="run the session-window variants")
     args = p.parse_args()
 
     if not Path(CONFIG).is_file():
@@ -193,14 +258,12 @@ def main() -> None:
     if had_file:
         shutil.copy2(PARAM_FILE, backup)
 
-    if args.only:
-        names = args.only
-    elif args.trend_set:
-        names = TREND_SET
-    elif args.enhance_set:
-        names = ENHANCE_SET
-    else:
-        names = list(VARIANTS)
+    sets = {
+        "trend_set": TREND_SET, "enhance_set": ENHANCE_SET,
+        "entry_set": ENTRY_SET, "timing_set": TIMING_SET,
+    }  # fmt: skip
+    chosen = [v for k, v in sets.items() if getattr(args, k)]
+    names = args.only or (chosen[0] if chosen else list(VARIANTS))
     combos = [(pair, tr) for pair in args.pair for tr in args.timerange]
     total = len(names) * len(combos)
     results: dict[tuple[str, str], dict[str, dict]] = {}
