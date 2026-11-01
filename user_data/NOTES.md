@@ -677,9 +677,65 @@ Same picture as on 5m, with about half the trades: good on SUI 2025-26, losing
 elsewhere. The MSS, displacement and confluence rows have too few trades on SUI
 to mean anything (8–37), and their BTC columns still disagree with each other.
 
-**Note on the 1h momentum run:** it crashed on a variant that produced zero trades
-(`m_disp1.5`, a full-ATR body is too strict on hourly candles). The runner now
-reports such a variant as zeros instead of failing; rerun to get the table.
+### SessionMomentum1h results: fails the rule, but the first candidate worth a third test
+
+| Variant | SUI 2024-25 | SUI 2025-26 | BTC 2024-25 | BTC 2025-26 | Min | Trades/col |
+|---|---|---|---|---|---|---|
+| m_base (= m_disp0.5) | 1.49 | 1.30 | 0.68 | 1.10 | 0.68 | 48 / 61 / 164 / 161 |
+| m_no_volume | 1.37 | 0.83 | 0.83 | 0.80 | 0.80 | 98 / 109 / 225 / 214 |
+| m_trend4h | 1.22 | 1.76 | 0.80 | 1.30 | 0.80 | 29 / 43 / 102 / 94 |
+| m_rsi1h | 1.45 | 1.53 | 0.78 | 1.11 | 0.78 | 39 / 53 / 136 / 144 |
+| **m_trend4h_rsi1h** | 1.24 | 1.66 | 0.89 | 1.27 | **0.89** | 25 / 41 / 93 / 91 |
+| m_stop_mid | 1.22 | 0.95 | 0.88 | 0.94 | 0.88 | 69 / 94 / 182 / 173 |
+| m_tp2 | 1.57 | 1.34 | 0.72 | 1.03 | 0.72 | 46 / 60 / 153 / 130 |
+| m_timestop6h | 1.88 | 1.39 | 0.65 | 0.80 | 0.65 | 48 / 62 / 170 / 170 |
+| m_trail2atr | 0.56 | 0.88 | 0.28 | 0.44 | 0.28 | |
+
+Why this one is different from everything before it:
+
+* **Three of four columns are positive** for the default rules, and the 4h-trend /
+  1h-RSI alignment makes the BTC columns better in both years (0.68→0.89,
+  1.10→1.27) while keeping SUI positive. Every earlier family had one good year.
+* **The failure is concentrated**: BTC 2024-25 New York (PF 0.46–0.55 in every
+  variant) while BTC 2024-25 London is 1.06–1.64. On 1h candles NY is only four
+  candles (13:00–16:00). This looks like one bad bucket rather than a broken idea.
+* **The volume filter earns its place here** (removing it: 1.30→0.83, 1.10→0.80),
+  unlike on 5m.
+* Caveats: SUI columns have 25–61 trades, so their PFs are rough; and the
+  hourly results use the same two years the whole project has been looking at.
+
+It still does **not** pass (0.89 < 1.10), so by the rule it is not a strategy
+yet. It is the first thing that deserves a genuinely new dataset instead of
+being dropped.
+
+**Pre-registered third test** (decided before any new data is seen):
+
+* Candidates: exactly two, `m_base` and `m_trend4h_rsi1h` on `SessionMomentum1h`,
+  unchanged.
+* New data: ETH/USDT:USDT for both years, plus BTC and SUI for 2023-10-31 to
+  2024-10-31 (one earlier year each). That is four unseen columns.
+* Pass: PF above 1.10 in every one of the four new columns for a candidate.
+  Any column with fewer than 30 trades is reported but cannot count as a pass.
+* If a candidate passes, the next step is a 4-week dry run, not live money.
+
+```bash
+freqtrade download-data --config user_data/config_sessionsweep.json --userdir user_data --pairs "ETH/USDT:USDT" --timeframes 1h 4h --trading-mode futures --timerange 20241020-20261031
+```
+
+```bash
+freqtrade download-data --config user_data/config_sessionsweep.json --userdir user_data --pairs "BTC/USDT:USDT" "SUI/USDT:USDT" --timeframes 1h 4h --trading-mode futures --timerange 20231020-20241031 --prepend
+```
+
+```bash
+python user_data/scripts/sessionsweep_variants.py --strategy SessionMomentum1h --only m_base m_trend4h_rsi1h --pair ETH/USDT:USDT --timerange 20241031-20251031 20251031-20261031
+```
+
+```bash
+python user_data/scripts/sessionsweep_variants.py --strategy SessionMomentum1h --only m_base m_trend4h_rsi1h --pair BTC/USDT:USDT SUI/USDT:USDT --timerange 20231031-20241031
+```
+
+`m_disp1.5` produces no trades on hourly candles (a full-ATR hourly body is too
+rare); the runner reports such variants as zeros.
 
 ## 5. Comparing variants in one go
 
