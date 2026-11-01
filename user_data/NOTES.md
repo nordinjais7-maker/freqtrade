@@ -5,7 +5,8 @@ Session-timing liquidity-sweep strategy for Freqtrade, built for
 
 | File | Purpose |
 |---|---|
-| `user_data/strategies/SessionSweep.py` | The strategy (all logic + parameters, heavily commented) |
+| `user_data/strategies/SessionSweep.py` | The sweep-and-reclaim strategy (all logic + parameters, heavily commented) |
+| `user_data/strategies/SessionMomentum.py` | The Asia-range breakout momentum strategy (section 4e) |
 | `user_data/config_sessionsweep.json` | Futures / isolated / dry-run config, 1 open trade, **API keys are placeholders** |
 | `user_data/scripts/sessionsweep_backtest.sh` | Exact download + backtest + session-split commands for your Mac |
 | `user_data/scripts/sessionsweep_variants.py` | Runs a batch of parameter variants and prints one comparison table |
@@ -502,6 +503,54 @@ python user_data/scripts/sessionsweep_variants.py --htf-set --pair SUI/USDT:USDT
 Same pass rule: **minimum PF across the four columns above 1.10.** Expect far
 fewer trades with the RSI filters on (on synthetic data 1h 70/30 kept about 5% of
 entries); a column with under about 30 trades is noise whatever its PF.
+
+## 4e. SessionMomentum: the opposite bet (`user_data/strategies/SessionMomentum.py`)
+
+Every sweep test so far pointed the same way: breaks of the Asia range tended to
+*continue*, which is why fading them lost. `SessionMomentum` trades with the break.
+
+**Rules (defaults):** during London or NY, the first 5m close beyond the Asia
+high/low whose body is ≥ 1 ATR in the break direction and whose volume is ≥ 1.5×
+the 20-candle average. Stop 0.1% beyond the breakout candle's low/high, capped at
+1.5% from entry. Target = one Asia range beyond the broken level. 1% of equity
+risked per trade, first break per session only, max 1 open trade, 3x isolated.
+
+| Parameter | Default | Meaning |
+|---|---|---|
+| `break_min_pct` | 0 | Close must exceed the level by this % |
+| `displacement_atr_mult` | 1.0 | Breakout candle body ≥ N × ATR(14); 0 = off |
+| `volume_mult` | 1.5 | Breakout volume ≥ N × 20-candle average; 0 = off |
+| `asia_range_min_pct` / `asia_range_max_pct` | 0.3 / 0 | Skip tiny / huge Asia ranges (max 0 = off) |
+| `max_trades_per_session` | 1 | Breaks per session per day; 0 = unlimited |
+| `use_trend_filter`, `trend_timeframe`, `trend_ema_len` | off, 4h, 50 | Trade only with the 1h/4h EMA |
+| `use_rsi_filter`, `rsi_timeframe`, `rsi_long_min`, `rsi_short_max` | off, 1h, 55, 45 | RSI on the momentum side of 50 |
+| `stop_mode` | candle | `candle` / `level` (back inside the range) / `mid` (Asia mid) |
+| `stop_buffer_pct`, `max_stop_distance_pct` | 0.1, 1.5 | Stop buffer and cap |
+| `tp_range_mult` | 1.0 | Target in Asia ranges beyond the level |
+| `trail_atr_mult`, `trail_start_r` | 0, 1.0 | ATR chandelier trail once N R in profit; 0 = off |
+| `max_trade_hours`, `exit_at_session_end`, `flat_time_min` | 0, off, 17:00 | Time exits |
+| `risk_per_trade_pct`, `leverage_level` | 1.0, 3.0 | Sizing and leverage |
+
+Verified on synthetic data: every entry is the first close beyond the level,
+in session, with the required body and volume; stops filled exactly at the
+planned level and targets within 0.11%; stop losses were 1.06–1.17% of equity;
+the session cap held; the ATR trail moved the stop on 36 of 64 trades and no trade
+ever exited worse than its initial stop.
+
+### How to test it (same rule: minimum PF > 1.10 across all four columns)
+
+18 variants, about 72 minutes for both pairs and years. The set was fixed before
+any result was seen; it covers the volume and displacement thresholds, trend and
+RSI alignment, the three stop modes, target distance, two trails, time exits, an
+Asia-range cap and one combination (`m_all`).
+
+```bash
+python user_data/scripts/sessionsweep_variants.py --strategy SessionMomentum --pair SUI/USDT:USDT BTC/USDT:USDT --timerange 20241031-20251031 20251031-20261031
+```
+
+Expect roughly 150–300 trades per pair-year (one per session at most). The
+volume filter is the part most likely to matter on real data: synthetic volume
+is random, so it was only checked for correctness, not for effect.
 
 ## 5. Comparing variants in one go
 

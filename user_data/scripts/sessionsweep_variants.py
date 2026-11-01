@@ -13,6 +13,9 @@ Usage (repo root, freqtrade virtualenv active, data already downloaded):
     python user_data/scripts/sessionsweep_variants.py --timerange 20250101-20251031
     python user_data/scripts/sessionsweep_variants.py --only baseline ny_only
     python user_data/scripts/sessionsweep_variants.py --pair BTC/USDT:USDT --only baseline
+    # the momentum strategy has its own table (18 variants, defaults = m_base)
+    python user_data/scripts/sessionsweep_variants.py --strategy SessionMomentum \
+        --pair SUI/USDT:USDT BTC/USDT:USDT --timerange 20241031-20251031 20251031-20261031
     # the full robustness check: both pairs, both years, one summary table at the end
     python user_data/scripts/sessionsweep_variants.py --enhance-set \
         --pair SUI/USDT:USDT BTC/USDT:USDT --timerange 20241031-20251031 20251031-20261031
@@ -29,10 +32,12 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 
-STRATEGY = "SessionSweep"
 CONFIG = "user_data/config_sessionsweep.json"
-PARAM_FILE = Path("user_data/strategies/SessionSweep.json")
 RESULTS_DIR = Path("user_data/backtest_results")
+# Set from --strategy in main(); SessionSweep variants are the module-level tables,
+# SessionMomentum variants live in MOMENTUM_VARIANTS.
+STRATEGY = "SessionSweep"
+PARAM_FILE = Path("user_data/strategies/SessionSweep.json")
 
 # name -> parameter overrides (anything not listed keeps the strategy default)
 VARIANTS: dict[str, dict] = {
@@ -180,6 +185,37 @@ HTF_SET = [
     "h_brk_trend4h", "h_brk_trend4h_rsi1h",
 ]  # fmt: skip
 
+# ---------------------------------------------------------------------------
+# SessionMomentum (Asia-range breakout, the opposite bet). Defaults already
+# include 1% risk, displacement >= 1 ATR, volume >= 1.5x, first break per session.
+# ---------------------------------------------------------------------------
+MOMENTUM_VARIANTS: dict[str, dict] = {
+    "m_base": {},
+    "m_no_volume": {"buy": {"volume_mult": 0.0}},
+    "m_disp0.5": {"buy": {"displacement_atr_mult": 0.5}},
+    "m_disp1.5": {"buy": {"displacement_atr_mult": 1.5}},
+    "m_trend4h": {"buy": {"use_trend_filter": True}},
+    "m_trend1h": {"buy": {"use_trend_filter": True, "trend_timeframe": "1h"}},
+    "m_rsi1h": {"buy": {"use_rsi_filter": True}},
+    "m_trend4h_rsi1h": {"buy": {"use_trend_filter": True, "use_rsi_filter": True}},
+    "m_stop_level": {"sell": {"stop_mode": "level"}},
+    "m_stop_mid": {"sell": {"stop_mode": "mid", "max_stop_distance_pct": 2.5}},
+    "m_tp0.5": {"sell": {"tp_range_mult": 0.5}},
+    "m_tp2": {"sell": {"tp_range_mult": 2.0}},
+    "m_trail2atr": {"sell": {"trail_atr_mult": 2.0, "tp_range_mult": 3.0}},
+    "m_trail3atr_r0.5": {
+        "sell": {"trail_atr_mult": 3.0, "trail_start_r": 0.5, "tp_range_mult": 3.0},
+    },
+    "m_timestop6h": {"sell": {"max_trade_hours": 6}},
+    "m_flat1700": {"sell": {"exit_at_session_end": True}},
+    "m_range_cap2": {"buy": {"asia_range_max_pct": 2.0}},
+    "m_all": {
+        "buy": {"use_trend_filter": True, "asia_range_max_pct": 2.5},
+        "sell": {"trail_atr_mult": 2.0, "tp_range_mult": 3.0, "max_trade_hours": 8},
+    },
+}  # fmt: skip
+MOMENTUM_SET = list(MOMENTUM_VARIANTS)
+
 TIMING_SET = [
     "t_base", "t_asia01_08", "t_asia00_08", "t_london_07_09", "t_london_08_11",
     "t_ny_1230_1430", "t_ny_1330_1600", "t_ny_1430_1700", "t_london_only", "t_ny_only",
@@ -274,7 +310,9 @@ def main() -> None:
         "--timerange", nargs="+", default=[default_timerange()],
         help="one or more YYYYMMDD-YYYYMMDD ranges; each gets its own table",
     )  # fmt: skip
-    p.add_argument("--only", nargs="+", choices=list(VARIANTS), help="run only these variants")
+    p.add_argument(
+        "--only", nargs="+", help="run only these variants (names from the chosen table)"
+    )
     p.add_argument("--trend-set", action="store_true", help="run only the trend-filter short list")
     p.add_argument(
         "--pair", nargs="+", default=["SUI/USDT:USDT"],
@@ -288,7 +326,16 @@ def main() -> None:
     p.add_argument(
         "--htf-set", action="store_true", help="run the higher-timeframe RSI/trend variants"
     )
+    p.add_argument(
+        "--strategy", default="SessionSweep", choices=["SessionSweep", "SessionMomentum"],
+        help="which strategy's variant table to use (default SessionSweep)",
+    )  # fmt: skip
     args = p.parse_args()
+    global STRATEGY, PARAM_FILE, VARIANTS
+    STRATEGY = args.strategy
+    PARAM_FILE = Path(f"user_data/strategies/{STRATEGY}.json")
+    if STRATEGY == "SessionMomentum":
+        VARIANTS = MOMENTUM_VARIANTS
 
     if not Path(CONFIG).is_file():
         raise SystemExit("Run this from the freqtrade repository root.")
@@ -304,7 +351,12 @@ def main() -> None:
         "entry_set": ENTRY_SET, "timing_set": TIMING_SET, "htf_set": HTF_SET,
     }  # fmt: skip
     chosen = [v for k, v in sets.items() if getattr(args, k)]
+    if STRATEGY == "SessionMomentum" and chosen:
+        sys.exit("The --*-set options are SessionSweep tables; use --only or no set for momentum.")
     names = args.only or (chosen[0] if chosen else list(VARIANTS))
+    unknown = [n for n in names if n not in VARIANTS]
+    if unknown:
+        sys.exit(f"Unknown variants for {STRATEGY}: {unknown}")
     combos = [(pair, tr) for pair in args.pair for tr in args.timerange]
     total = len(names) * len(combos)
     results: dict[tuple[str, str], dict[str, dict]] = {}
