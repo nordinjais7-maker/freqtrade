@@ -80,6 +80,10 @@ def write_data(datadir: Path, days: int, seed: int) -> None:
     for c in ("open", "high", "low", "close"):
         btc5[c] = btc5[c] * 40000
     resample(btc5, "15min").to_feather(fut / "BTC_USDT_USDT-15m-futures.feather")
+    btc1h = resample(btc5, "1h")
+    btc1h.to_feather(fut / "BTC_USDT_USDT-1h-futures.feather")
+    btc1h.to_feather(fut / "BTC_USDT_USDT-1h-mark.feather")
+
     # Synthetic hourly flow (long/short ratio + open interest) in the okx_flow schema,
     # for SuiFlushShort smoke tests (set SUIFLUSH_FLOW_FILE to this path).
     flow_dir = datadir / "okx_flow"
@@ -98,17 +102,25 @@ def write_data(datadir: Path, days: int, seed: int) -> None:
         fr[c] = 0.0001
     fr["volume"] = 0.0
     fr.to_feather(fut / f"{PAIR_FILE}-1h-funding_rate.feather")
+    fr.to_feather(fut / "BTC_USDT_USDT-1h-funding_rate.feather")
     print(f"Synthetic data written to {fut}: {len(df5)} x 5m candles")
     print(f"  range {start:%Y-%m-%d} -> {end:%Y-%m-%d}")
 
 
 def fake_markets() -> dict:
-    sui = _market(PAIR, "SUIUSDT", "SUI", 4)
-    btc = _market("BTC/USDT:USDT", "BTCUSDT", "BTC", 1)
+    sui = _market(PAIR, "SUIUSDT", "SUI", 4, 1, 0.1)
+    btc = _market("BTC/USDT:USDT", "BTCUSDT", "BTC", 1, 3, 0.001)
     return {PAIR: sui, "BTC/USDT:USDT": btc}
 
 
-def _market(symbol: str, market_id: str, base: str, price_precision: int) -> dict:
+def _market(
+    symbol: str,
+    market_id: str,
+    base: str,
+    price_precision: int,
+    amount_precision: int,
+    min_amount: float,
+) -> dict:
     return {
         "id": market_id,
         "symbol": symbol,
@@ -135,10 +147,10 @@ def _market(symbol: str, market_id: str, base: str, price_precision: int) -> dic
         "expiryDatetime": None,
         "strike": None,
         "optionType": None,
-        "precision": {"amount": 1, "price": price_precision, "base": 8, "quote": 8},
+        "precision": {"amount": amount_precision, "price": price_precision, "base": 8, "quote": 8},
         "limits": {
             "leverage": {"min": 1, "max": 75},
-            "amount": {"min": 0.1, "max": 10000000},
+            "amount": {"min": min_amount, "max": 10000000},
             "price": {"min": 0.0001, "max": 10000},
             "cost": {"min": 5, "max": None},
         },

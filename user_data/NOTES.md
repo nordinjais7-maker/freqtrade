@@ -937,6 +937,47 @@ untested beyond two months and the only honest path is forward data: keep
 python user_data/scripts/sessionsweep_variants.py --strategy SuiFlushShort --only f_bin_abs2.0 --timeframe-detail 1m --pair SUI/USDT:USDT --timerange 20260903-20261031
 ```
 
+**Result:** 68 trades, win 41.2%, PF 1.19, 3 of 5 folds. The Binance absolute
+threshold keeps about as many trades as the OKX rule (68 vs 57) but shows no
+lift over the unfiltered break (1.18 on 93 trades). So the Binance ratio *is* a
+fair size-for-size proxy, and the OKX filter's apparent lift (1.18 → 1.67) is
+either information unique to OKX's trader population or, more likely given the
+OKX bootstrap band of 0.88–3.25 on 57 trades, noise. Either way it cannot be
+confirmed from history.
+
+**Final reading of SuiFlushShort on SUI:** the break alone is regime-dependent and
+loses over two years; the best available two-year test of "break + crowded
+longs" (Binance absolute 2.0) gives PF 0.70 in both years; the OKX variant's
+extra lift rests on 57 trades and is not separable from luck. Not a strategy to
+trade. The one remaining source of evidence is forward OKX data, which costs
+nothing to collect: run `fetch_okx_flow.py` weekly.
+
+### Pre-registered BTC test (the rule has never seen BTC)
+
+The strategy now derives its flow instrument from the traded pair and skips the
+BTC filter when trading BTC itself. Candidates fixed in advance: `f_bin_abs2.0`
+(main), `f_bin_noflow` (control), `f_okx_default` over the OKX window. Pass =
+PF > 1.10 in both years with ≥ 30 trades and verdict ≥ WATCH, and the control
+clearly worse. Expectation stated before running: BTC's long/short ratio sits
+lower than SUI's, so the absolute 2.0 may select few trades; if a column has
+fewer than 30 trades it is reported as THIN and cannot pass.
+
+```bash
+python user_data/scripts/fetch_binance_flow.py --symbol BTCUSDT --start 2024-10-20 --end 2026-10-31
+```
+
+```bash
+python user_data/scripts/fetch_okx_flow.py --inst BTC-USDT-SWAP
+```
+
+```bash
+python user_data/scripts/sessionsweep_variants.py --strategy SuiFlushShort --only f_bin_abs2.0 f_bin_pct80 f_bin_noflow --timeframe-detail 1m --pair BTC/USDT:USDT --timerange 20241031-20251031 20251031-20261031
+```
+
+```bash
+python user_data/scripts/sessionsweep_variants.py --strategy SuiFlushShort --only f_okx_default f_bin_abs2.0 f_bin_noflow --timeframe-detail 1m --pair BTC/USDT:USDT --timerange 20260903-20261031
+```
+
 ## 5. Comparing variants in one go
 
 `user_data/scripts/sessionsweep_variants.py` runs a set of variants and prints one

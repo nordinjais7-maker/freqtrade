@@ -32,6 +32,9 @@ Flow data (hourly long/short ratio + open interest):
     if that fails, entries pause and the bot keeps running.
   * no lookahead: an hourly row is used only after its hour has closed.
   * SUIFLUSH_FLOW_FILE (environment variable) overrides the file path (tests).
+  * The flow instrument follows the traded pair (SUI/USDT:USDT -> SUI-USDT-SWAP /
+    SUIUSDT), so the same strategy can be backtested on BTC, ETH, ... once their
+    flow files exist. The BTC filter is skipped when the traded pair is BTC itself.
 
 Backtest reference from the playbook (OKX, Aug-Nov 2026, before fees):
 RB + L/S >= 2.6 -> +0.47R/trade (n=78). Plain range break ~ breakeven after fees.
@@ -129,32 +132,35 @@ class SuiFlushShort(IStrategy):
     fee_buffer = 0.001  # ~0.1% round-trip taker fees, added to the stop distance when sizing
 
     flow_files = {
-        "okx": "user_data/data/okx_flow/SUI-USDT-SWAP_1H.feather",
-        "binance": "user_data/data/binance_flow/SUIUSDT_1H.feather",
+        "okx": "user_data/data/okx_flow/{base}-USDT-SWAP_1H.feather",
+        "binance": "user_data/data/binance_flow/{base}USDT_1H.feather",
     }
-    okx_inst = "SUI-USDT-SWAP"
-    binance_symbol = "SUIUSDT"
     flow_refresh = timedelta(minutes=5)
 
     def __init__(self, config: dict) -> None:
         super().__init__(config)
-        self._flow: DataFrame | None = None
-        self._flow_loaded_at: datetime | None = None
+        self._flow: dict[str, DataFrame | None] = {}
+        self._flow_loaded_at: dict[str, datetime] = {}
+
+    @staticmethod
+    def _base(pair: str) -> str:
+        return pair.split("/")[0]
 
     # ---- informative -------------------------------------------------------------------
     def informative_pairs(self):
         return [(self.btc_pair, self.timeframe)]
 
     # ---- flow data ---------------------------------------------------------------------
-    def _flow_path(self) -> Path:
+    def _flow_path(self, pair: str) -> Path:
         override = os.environ.get("SUIFLUSH_FLOW_FILE")
-        p = Path(override) if override else Path(self.flow_files[self.flow_source.value])
+        template = self.flow_files[self.flow_source.value]
+        p = Path(override) if override else Path(template.format(base=self._base(pair)))
         if not p.is_absolute():
             p = Path(self.config.get("user_data_dir", "user_data")).parent / p
         return p
 
-    def _load_flow_file(self) -> DataFrame | None:
-        path = self._flow_path()
+    def _load_flow_file(self, pair: str) -> DataFrame | None:
+        path = self._flow_path(pair)
         if not path.exists():
             logger.warning(
                 "Flow file %s not found - run the matching fetch script in user_data/scripts", path
@@ -162,8 +168,10 @@ class SuiFlushShort(IStrategy):
             return None
         return pd.read_feather(path)
 
-    def _fetch_flow_live(self) -> DataFrame | None:
+    def _fetch_flow_live(self, pair: str) -> DataFrame | None:
         """Last ~100 (OKX) / ~500 (Binance) hourly rows of L/S and OI, public, no key."""
+        okx_inst = f"{self._base(pair)}-USDT-SWAP"
+        binance_symbol = f"{self._base(pair)}USDT"
         try:
             import requests
 
@@ -184,10 +192,10 @@ class SuiFlushShort(IStrategy):
 
                 ls = okx(
                     "rubik/stat/contracts/long-short-account-ratio-contract"
-                    f"?instId={self.okx_inst}&period=1H&limit=100"
+                    f"?instId={okx_inst}&period=1H&limit=100"
                 )
                 oi = okx(
-                    f"rubik/stat/contracts/open-interest-history?instId={self.okx_inst}"
+                    f"rubik/stat/contracts/open-interest-history?instId={okx_inst}"
                     "&period=1H&limit=100"
                 )
                 if not ls or not oi:
@@ -196,12 +204,11 @@ class SuiFlushShort(IStrategy):
                 oid = pd.DataFrame([r[:2] for r in oi], columns=["ts", "oi"])
             else:
                 ls = get(
-                    f"{BINANCE_FAPI}globalLongShortAccountRatio?symbol={self.binance_symbol}"
+                    f"{BINANCE_FAPI}globalLongShortAccountRatio?symbol={binance_symbol}"
                     "&period=1h&limit=500"
                 )
                 oi = get(
-                    f"{BINANCE_FAPI}openInterestHist?symbol={self.binance_symbol}"
-                    "&period=1h&limit=500"
+                    f"{BINANCE_FAPI}openInterestHist?symbol={binance_symbol}&period=1h&limit=500"
                 )
                 if not ls or not oi:
                     return None
@@ -221,30 +228,37 @@ class SuiFlushShort(IStrategy):
             return None
 
     def bot_loop_start(self, current_time: datetime, **kwargs) -> None:
-        if self._flow is None:
-            self._flow = self._load_flow_file()
-            self._flow_loaded_at = current_time
-        if self.dp.runmode.value not in ("live", "dry_run"):
-            return
-        if (
-            self._flow_loaded_at
-            and current_time - self._flow_loaded_at < self.flow_refresh
-            and self._flow is not None
-        ):
-            return
-        fresh = self._fetch_flow_live()
-        if fresh is not None:
-            base = self._flow if self._flow is not None else fresh.iloc[0:0]
-            self._flow = (
-                pd.concat([base, fresh])
-                .drop_duplicates("date", keep="last")
-                .sort_values("date")
-                .reset_index(drop=True)
-            )
-        self._flow_loaded_at = current_time
+        pairs = self.dp.current_whitelist() if self.dp else []
+        for pair in pairs:
+            if pair not in self._flow:
+                self._flow[pair] = self._load_flow_file(pair)
+                self._flow_loaded_at[pair] = current_time
+            if self.dp.runmode.value not in ("live", "dry_run"):
+                continue
+            loaded_at = self._flow_loaded_at.get(pair)
+            if (
+                loaded_at
+                and current_time - loaded_at < self.flow_refresh
+                and self._flow.get(pair) is not None
+            ):
+                continue
+            fresh = self._fetch_flow_live(pair)
+            if fresh is not None:
+                base = self._flow.get(pair)
+                base = base if base is not None else fresh.iloc[0:0]
+                self._flow[pair] = (
+                    pd.concat([base, fresh])
+                    .drop_duplicates("date", keep="last")
+                    .sort_values("date")
+                    .reset_index(drop=True)
+                )
+            self._flow_loaded_at[pair] = current_time
 
-    def _merge_flow(self, df: DataFrame) -> DataFrame:
-        flow = self._flow if self._flow is not None else self._load_flow_file()
+    def _merge_flow(self, df: DataFrame, pair: str) -> DataFrame:
+        flow = self._flow.get(pair)
+        if flow is None:
+            flow = self._load_flow_file(pair)
+            self._flow[pair] = flow
         cols = ["ls", "ls_ch2", "oi_ch4", "ls_q"]
         if flow is None or flow.empty:
             for c in cols:
@@ -288,7 +302,7 @@ class SuiFlushShort(IStrategy):
             1 + float(self.stop_buffer_pct.value) / 100
         )
 
-        if self.dp:
+        if self.dp and metadata.get("pair") != self.btc_pair:
             btc = self.dp.get_pair_dataframe(pair=self.btc_pair, timeframe=self.timeframe)
             if btc is not None and not btc.empty:
                 btc = self._range_break(btc.copy(), n)
@@ -300,7 +314,7 @@ class SuiFlushShort(IStrategy):
         if "btc_below" not in df.columns:
             df["btc_below"] = False
 
-        df = self._merge_flow(df)
+        df = self._merge_flow(df, metadata["pair"])
         return df
 
     # ---- entry -------------------------------------------------------------------------
