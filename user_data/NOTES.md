@@ -737,6 +737,41 @@ python user_data/scripts/sessionsweep_variants.py --strategy SessionMomentum1h -
 `m_disp1.5` produces no trades on hourly candles (a full-ATR hourly body is too
 rare); the runner reports such variants as zeros.
 
+### Third test result: both candidates fail
+
+Four unseen columns, pass mark PF > 1.10 in every one:
+
+| Candidate | ETH 2024-25 | ETH 2025-26 | BTC 2023-24 | SUI 2023-24 | Min | Trades |
+|---|---|---|---|---|---|---|
+| m_base | 0.77 | 0.86 | 0.64 | 0.69 | 0.64 | 116 / 145 / 162 / 40 |
+| m_trend4h_rsi1h | 1.04 | 1.05 | 0.72 | 0.79 | 0.72 | 71 / 91 / 90 / 19 |
+
+Robustness columns agreed: every bootstrap PF band includes values below 1,
+every permutation p-value is above 0.4, and at most 3 of 5 calendar folds were
+profitable. The aligned variant is better than the plain one in all four new
+columns (as it was in all four original ones), but it is roughly break-even on
+ETH and loses on the 2023-24 year of both coins.
+
+The one consistent structural finding across the whole study: **London beats
+New York for hourly breakouts** (ETH London PF 1.62 / 1.70 vs NY 0.70 / 0.55; the
+same split on BTC 2024-25). Noted as a hypothesis for a future study; not tested
+further here, because testing it now on data already seen would be the mistake
+this project set out to avoid.
+
+## Final conclusion of the study
+
+| Family | Rule sets | Pairs × years | Best minimum PF | Passed |
+|---|---|---|---|---|
+| Sweep 5m | 31 | 2 × 2 | 0.81 | no |
+| Sweep 1h | 8 | 2 × 2 | 0.74 | no |
+| Momentum 5m | 18 | 2 × 2 | 0.66 | no |
+| Momentum 1h | 18 + out-of-sample | 3 pairs, 3 years | 0.89 in-sample, 0.72 out-of-sample | no |
+
+Neither fading nor trading the break of the Asia session range on Binance
+perpetuals produced an edge that survives a change of year or pair. The code
+is a working, verified research harness; none of the strategies should be run
+with money.
+
 ## 5. Comparing variants in one go
 
 `user_data/scripts/sessionsweep_variants.py` runs a set of variants and prints one
