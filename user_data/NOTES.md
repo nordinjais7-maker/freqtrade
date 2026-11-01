@@ -900,6 +900,42 @@ Pass mark: PF > 1.10 in every unseen column with >= 30 trades.
 Verdict: hypothesis rejected. Per the pre-registration, no further regime
 variants on this data.
 
+## 5d. Order-flow logging and the forward desk-filter test
+
+Every OHLCV-only family above failed on unseen data. The one thing the live SUI
+desk uses that the bot cannot see is order flow (L/S falling, OI dropping, taker
+delta). OKX keeps only ~60 days of hourly per-contract history (~5 days at 5m;
+daily since 2024), so it cannot be backtested over years: it has to be collected.
+
+| Script | What it does |
+|---|---|
+| `user_data/scripts/orderflow_logger.py` | Pulls OKX OI, all-account L/S, top-trader position L/S, taker buy/sell (1H and 5m) and funding for SUI/BTC/ETH perps into `user_data/orderflow/*.csv`. First run back-fills everything OKX still has; later runs merge new rows. |
+| `user_data/scripts/orderflow_join.py` | Adds order-flow features to backtest trades, using only hourly bars that closed before the entry and the hour immediately before it (no look-ahead, no stale data across gaps), then scores the trades by them with the robustness numbers. |
+
+Features at entry: `oi_chg_3h`, `ls_chg_3h`, `taker_delta_3h`, `top_pos`, `funding`.
+
+**Pre-registered desk filter** (written before any result): longs need
+`ls_chg_3h < 0 and oi_chg_3h < 0` ("flush ending"); shorts need
+`ls_chg_3h > 0 and taker_delta_3h < 0` ("retail chasing into sellers").
+
+**Pre-registered forward test** (decided 2026-11-01):
+
+* Strategy: `SessionSweep1h`, variant `risk1`, unchanged. Pairs SUI, BTC, ETH.
+* Only trades opening after 2026-11-02 count (the 60-day back-fill is exploratory).
+* Score when the desk-PASS bucket has >= 30 trades (likely 3-6 months).
+* Pass: desk-PASS PF > 1.10, desk-PASS p_perm < 0.05 (one test, no correction),
+  and desk-PASS PF above desk-FAIL PF. Fail on any of the three.
+
+```bash
+# once now (back-fill), then hourly via crontab -e:
+python user_data/scripts/orderflow_logger.py
+# 7 * * * * cd /Users/<you>/freqtrade && .venv/bin/python user_data/scripts/orderflow_logger.py >> user_data/orderflow/log.txt 2>&1
+
+# exploratory read on the back-filled ~60 days
+python user_data/scripts/sessionsweep_variants.py --strategy SessionSweep1h --only risk1 --pair SUI/USDT:USDT BTC/USDT:USDT ETH/USDT:USDT --timerange 20260902-20261101
+python user_data/scripts/orderflow_join.py --last 3
+```
+
 ## 6. Suggested next tests
 
 1. **Done: out-of-sample check of the trend filter.** It failed (section 4), so the
