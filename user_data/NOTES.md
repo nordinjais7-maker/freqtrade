@@ -886,10 +886,10 @@ with it (0.62 / 0.75) the strategy is no better than without it (0.68 / 0.69),
 which is the opposite of the playbook's central claim. The range break itself
 loses about 0.3R per trade after costs across both years, in every regime label.
 
-**Conclusion.** The playbook's result is a two-month regime artefact: shorting SUI
-breakdowns paid during Sep–Oct 2026 and in the aftermath of sharp rallies, and
-lost over the two years before. The code is correct; the idea does not generalise.
-Do not dry-run or trade it.
+**Conclusion (revised after the diagnostic below).** The plain break is a two-month
+regime artefact. Whether the OKX crowded-longs filter adds a durable edge is
+*unresolved*, because no backtestable proxy for it has been validated yet; see the
+diagnostic. Do not trade it with money.
 
 One diagnostic that would sharpen this (not a search for a winner): run
 `f_bin_pct80` over the same 2026-09-03 → 2026-10-31 window. If it also shows
@@ -899,6 +899,42 @@ differently and the replication and main test are not directly comparable.
 
 ```bash
 python user_data/scripts/sessionsweep_variants.py --strategy SuiFlushShort --only f_bin_pct80 f_bin_noflow --timeframe-detail 1m --pair SUI/USDT:USDT --timerange 20260903-20261031
+```
+
+**Diagnostic result (same 60-day window):**
+
+| Variant | Trades | Win % | PF |
+|---|---|---|---|
+| OKX ≥ 2.6 (replication) | 57 | 52.6 | 1.67 |
+| Binance percentile 80 | 10 | 40.0 | 1.32 |
+| No filter | 93 | 43.0 | 1.18 |
+
+The Binance percentile filter passed 10 of 93 breaks where the OKX rule passed 57,
+so **the two-year test judged a different filter, not the OKX rule on more data.**
+A rolling percentile rises when the ratio stays high for weeks, which is exactly
+the crowded regime the playbook wants to trade, so percentile mode is the wrong
+proxy for an absolute "crowded" level. This weakens the earlier sentence "the
+filter is not the edge" to: *the Binance-percentile filter is not an edge*.
+
+What the data does and does not show now:
+
+* The plain 6h-low break was mildly profitable in Sep–Oct 2026 (PF 1.18, 93
+  trades) and lost over the two years before (0.68 / 0.69). The break itself is
+  regime-dependent; that part is settled.
+* Within the window the OKX filter lifted PF from 1.18 to 1.67 by keeping 57 of 93
+  trades. Whether that selection repeats cannot be tested backwards: OKX has no
+  history beyond 60 days, and no Binance proxy has been shown to match it yet.
+
+**Closing diagnostic, the proxy check that was still missing:** the absolute
+Binance threshold (`f_bin_abs2.0`, which the playbook's own numbers suggest is the
+OKX-2.6 equivalent) over the same window. If it keeps roughly 50 trades with PF
+near 1.6, the Binance absolute ratio is a fair proxy and its two-year result
+(0.70 / 0.70) is the verdict on the rule. If it does not, the OKX rule remains
+untested beyond two months and the only honest path is forward data: keep
+`fetch_okx_flow.py` running weekly to build history, and judge again in six months.
+
+```bash
+python user_data/scripts/sessionsweep_variants.py --strategy SuiFlushShort --only f_bin_abs2.0 --timeframe-detail 1m --pair SUI/USDT:USDT --timerange 20260903-20261031
 ```
 
 ## 5. Comparing variants in one go
