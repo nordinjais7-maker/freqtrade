@@ -73,6 +73,7 @@ def write_data(datadir: Path, days: int, seed: int) -> None:
     df1h = resample(df5, "1h")
     df5.to_feather(fut / f"{PAIR_FILE}-5m-futures.feather")
     df1h.to_feather(fut / f"{PAIR_FILE}-1h-futures.feather")
+    resample(df5, "4h").to_feather(fut / f"{PAIR_FILE}-4h-futures.feather")
     # Mark price ~ last price; funding every 8h at a small positive rate.
     df1h.to_feather(fut / f"{PAIR_FILE}-1h-mark.feather")
     fr = df1h[df1h["date"].dt.hour % 8 == 0].copy()
@@ -183,7 +184,7 @@ def main() -> None:
     if not args.no_generate:
         write_data(datadir, args.days, args.seed)
     end = pd.Timestamp.now("UTC").floor("D")
-    start = end - pd.Timedelta(days=args.days - 3)  # leave startup candles
+    start = end - pd.Timedelta(days=args.days - 6)  # leave startup candles
     print("=" * 70)
     print("SYNTHETIC DATA - results below prove the plumbing works, nothing else")
     print("=" * 70)

@@ -16,13 +16,13 @@ END=$(date -u +%Y%m%d)
 START=$(date -u -v-365d +%Y%m%d 2>/dev/null || date -u -d '365 days ago' +%Y%m%d)
 TIMERANGE=${TIMERANGE:-"${START}-${END}"}
 
-echo ">>> 1/3 Downloading 5m + 1h futures candles (plus mark & funding) for ${PAIR}"
+echo ">>> 1/3 Downloading 5m + 1h + 4h futures candles (plus mark & funding) for ${PAIR}"
 # --timerange is padded by ~10 days so the strategy's startup candles are available.
 PAD_START=$(date -u -v-375d +%Y%m%d 2>/dev/null || date -u -d '375 days ago' +%Y%m%d)
 freqtrade download-data \
     --config "${CONFIG}" --userdir user_data \
     --pairs "${PAIR}" \
-    --timeframes 5m 1h \
+    --timeframes 5m 1h 4h \
     --timerange "${PAD_START}-${END}" \
     --trading-mode futures
 

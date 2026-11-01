@@ -140,7 +140,7 @@ or step by step:
 
 ```bash
 freqtrade download-data --config user_data/config_sessionsweep.json --userdir user_data \
-  --pairs "SUI/USDT:USDT" --timeframes 5m 1h --trading-mode futures \
+  --pairs "SUI/USDT:USDT" --timeframes 5m 1h 4h --trading-mode futures \
   --timerange 20251021-20261031
 ```
 
@@ -315,7 +315,7 @@ needs PF above about 1.15 on *both* years):
 
 ```bash
 freqtrade download-data --config user_data/config_sessionsweep.json --userdir user_data \
-  --pairs "BTC/USDT:USDT" --timeframes 5m 1h --trading-mode futures --timerange 20241020-20261031
+  --pairs "BTC/USDT:USDT" --timeframes 5m 1h 4h --trading-mode futures --timerange 20241020-20261031
 ```
 
 ```bash
@@ -463,6 +463,46 @@ python user_data/scripts/sessionsweep_timing.py
 A timing effect is real only if the same hours win on both pairs and both years;
 a cell with fewer than about 30 trades is noise.
 
+## 4d. Higher timeframe: 4h trend and RSI overbought / oversold
+
+| Parameter | Default | Effect when on |
+|---|---|---|
+| `trend_timeframe` | `1h` | `4h`: the EMA trend filter uses 4h candles instead of 1h |
+| `use_rsi_filter` | off | Shorts need RSI ≥ `rsi_overbought` (70), longs need RSI ≤ `rsi_oversold` (30) |
+| `rsi_timeframe` | `1h` | Timeframe of that RSI: `5m`, `1h` or `4h` |
+| `rsi_len` | 14 | RSI length (Wilder smoothing, pure pandas) |
+
+**4h data is now required.** Download it for every pair before backtesting
+(the strategy declares a 4h informative even when the filters are off):
+
+```bash
+freqtrade download-data --config user_data/config_sessionsweep.json --userdir user_data --pairs "SUI/USDT:USDT" "BTC/USDT:USDT" --timeframes 4h --trading-mode futures --timerange 20241020-20261031
+```
+
+Verified on synthetic data: defaults reproduce the previous trade list exactly;
+the 5m RSI matches pandas-ta to 5e-6; the 1h RSI a 5m candle sees is exactly the
+RSI of the last *closed* 1h candle (no lookahead); with the filter on, every short
+had RSI ≥ threshold and every long RSI ≤ threshold on the chosen timeframe.
+
+One thing to know before reading results: **4h RSI ≥ 60 and "4h close below the
+4h EMA" almost never hold at the same time** (both describe the same recent 4h
+move), so combining the 4h RSI filter with the 4h trend filter produces close to
+zero trades. The variant set therefore pairs the 4h trend with the *1h* RSI,
+which is the classic "overbought pull-back inside a downtrend" condition.
+
+### How to test it
+
+12 variants, about 48 minutes for both pairs and years. Six apply the filters to
+the plain strategy (control `risk1`), six to the full breakout model (control `t_base`):
+
+```bash
+python user_data/scripts/sessionsweep_variants.py --htf-set --pair SUI/USDT:USDT BTC/USDT:USDT --timerange 20241031-20251031 20251031-20261031
+```
+
+Same pass rule: **minimum PF across the four columns above 1.10.** Expect far
+fewer trades with the RSI filters on (on synthetic data 1h 70/30 kept about 5% of
+entries); a column with under about 30 trades is noise whatever its PF.
+
 ## 5. Comparing variants in one go
 
 `user_data/scripts/sessionsweep_variants.py` runs a set of variants and prints one
@@ -472,10 +512,11 @@ compact table with the London / NY split. It needs data that is already download
 python user_data/scripts/sessionsweep_variants.py
 ```
 
-The full set has 44 variants and takes about 44 minutes per pair/year. `--trend-set`
+The full set has 54 variants and takes about 54 minutes per pair/year. `--trend-set`
 runs the six trend-filter variants, `--enhance-set` the eight structural
 enhancements, `--entry-set` the nine breakout-entry variants, `--timing-set` the
-twelve session-window variants. `--pair` and `--timerange` accept several values; with more than one
+twelve session-window variants, `--htf-set` the twelve higher-timeframe RSI/trend
+variants. `--pair` and `--timerange` accept several values; with more than one
 combination the script prints a profit-factor grid at the end. Use `--only` to pick
 specific variants.
 
@@ -483,7 +524,7 @@ To check a winner out of sample, download the previous year and rerun on it:
 
 ```bash
 freqtrade download-data --config user_data/config_sessionsweep.json --userdir user_data \
-  --pairs "SUI/USDT:USDT" --timeframes 5m 1h --trading-mode futures \
+  --pairs "SUI/USDT:USDT" --timeframes 5m 1h 4h --trading-mode futures \
   --timerange 20241020-20251031 --prepend
 ```
 

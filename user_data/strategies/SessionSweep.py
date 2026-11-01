@@ -33,6 +33,9 @@ Enhancements (all OFF by default, so the defaults reproduce the original rules):
                               previous day's extreme (support / resistance)
   * flush_atr_mult          - after a flush candle in our favour, exit on the first
                               opposite-colour candle (momentum exhaustion exit)
+  * trend_timeframe         - run the EMA trend filter on 1h or 4h candles
+  * use_rsi_filter          - higher-timeframe RSI must be overbought for shorts
+                              and oversold for longs (rsi_timeframe: 5m / 1h / 4h)
 
 All session windows and thresholds are strategy parameters, so they can be
 overridden from `SessionSweep.json` next to this file, from the `strategy`
@@ -79,8 +82,10 @@ class SessionSweep(IStrategy):
     timeframe = "5m"
     can_short = True
     process_only_new_candles = True
-    # 1h trend EMA (default 50) needs 50h = 600 five-minute candles. Add headroom.
-    startup_candle_count = 720
+    # 1h trend EMA (default 50) needs 50h = 600 five-minute candles. The optional
+    # 4h indicators get 1200 x 5m = 100h of warm-up (25 x 4h candles), enough for
+    # RSI(14) and a usable EMA.
+    startup_candle_count = 1200
 
     # ROI: effectively disabled - the take profit is handled by custom_roi()
     # (target = opposite side of the Asia range). A ridiculous value keeps
@@ -172,6 +177,21 @@ class SessionSweep(IStrategy):
     # ------------------------------------------------------------------ #
     use_trend_filter = BooleanParameter(default=False, space="buy", optimize=True)
     trend_ema_len = IntParameter(10, 200, default=50, space="buy", optimize=False)
+    trend_timeframe = CategoricalParameter(["1h", "4h"], default="1h", space="buy", optimize=False)
+
+    # ------------------------------------------------------------------ #
+    # Parameters - RSI overbought / oversold filter (optional)
+    # ------------------------------------------------------------------ #
+    # Shorts need RSI >= rsi_overbought, longs need RSI <= rsi_oversold, on the
+    # chosen timeframe (closed candles only; the 1h/4h values are shifted by
+    # Freqtrade so a 5m candle never sees an unfinished higher-timeframe candle).
+    use_rsi_filter = BooleanParameter(default=False, space="buy", optimize=False)
+    rsi_timeframe = CategoricalParameter(
+        ["5m", "1h", "4h"], default="1h", space="buy", optimize=False
+    )
+    rsi_len = IntParameter(5, 30, default=14, space="buy", optimize=False)
+    rsi_overbought = IntParameter(50, 90, default=70, space="buy", optimize=False)
+    rsi_oversold = IntParameter(10, 50, default=30, space="buy", optimize=False)
 
     # ------------------------------------------------------------------ #
     # Parameters - enhancements (every default = OFF / original behaviour)
@@ -241,19 +261,39 @@ class SessionSweep(IStrategy):
             "asia_low": {"color": "orange"},
             "ema_1h": {"color": "grey"},
         },
-        "subplots": {"session": {"session_id": {"color": "blue"}}},
+        "subplots": {
+            "session": {"session_id": {"color": "blue"}},
+            "rsi": {"rsi_1h": {"color": "purple"}, "rsi_4h": {"color": "black"}},
+        },
     }
 
     # ================================================================== #
     # Informative 1h data (trend filter)
     # ================================================================== #
-    @informative("1h")
-    def populate_indicators_1h(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
+    @staticmethod
+    def _rsi(close: pd.Series, length: int) -> pd.Series:
+        """Wilder RSI in pure pandas (no TA-Lib dependency)."""
+        delta = close.diff()
+        gain = delta.clip(lower=0).ewm(alpha=1 / length, adjust=False).mean()
+        loss = (-delta.clip(upper=0)).ewm(alpha=1 / length, adjust=False).mean()
+        rs = gain / loss.replace(0, np.nan)
+        return (100 - 100 / (1 + rs)).fillna(100.0)
+
+    def _htf_indicators(self, dataframe: DataFrame) -> DataFrame:
         # Pure-pandas EMA so the strategy has no TA-Lib dependency.
         dataframe["ema"] = (
             dataframe["close"].ewm(span=int(self.trend_ema_len.value), adjust=False).mean()
         )
+        dataframe["rsi"] = self._rsi(dataframe["close"], int(self.rsi_len.value))
         return dataframe
+
+    @informative("1h")
+    def populate_indicators_1h(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
+        return self._htf_indicators(dataframe)
+
+    @informative("4h")
+    def populate_indicators_4h(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
+        return self._htf_indicators(dataframe)
 
     # ================================================================== #
     # Indicators
@@ -316,6 +356,7 @@ class SessionSweep(IStrategy):
             axis=1,
         ).max(axis=1)
         dataframe["atr"] = tr.ewm(alpha=1 / 14, adjust=False).mean()
+        dataframe["rsi"] = self._rsi(dataframe["close"], int(self.rsi_len.value))
 
         # Recent swing extremes for the market-structure-shift filter,
         # excluding the current candle.
@@ -457,9 +498,17 @@ class SessionSweep(IStrategy):
             long_ok &= long_rr >= min_rr
 
         # --- Optional 1h trend filter --------------------------------------
-        if self.use_trend_filter.value and "ema_1h" in dataframe.columns:
-            short_ok &= dataframe["close_1h"] < dataframe["ema_1h"]
-            long_ok &= dataframe["close_1h"] > dataframe["ema_1h"]
+        tf = self.trend_timeframe.value
+        if self.use_trend_filter.value and f"ema_{tf}" in dataframe.columns:
+            short_ok &= dataframe[f"close_{tf}"] < dataframe[f"ema_{tf}"]
+            long_ok &= dataframe[f"close_{tf}"] > dataframe[f"ema_{tf}"]
+
+        # --- Optional RSI overbought / oversold filter ----------------------
+        if self.use_rsi_filter.value:
+            rtf = self.rsi_timeframe.value
+            rsi_col = "rsi" if rtf == "5m" else f"rsi_{rtf}"
+            short_ok &= dataframe[rsi_col] >= int(self.rsi_overbought.value)
+            long_ok &= dataframe[rsi_col] <= int(self.rsi_oversold.value)
 
         # Persist the trade geometry on the signal candle so the callbacks can
         # read it back (see _signal_candle()).

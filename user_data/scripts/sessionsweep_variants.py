@@ -142,6 +142,44 @@ VARIANTS.update(
         "t_flat_2100": _t(sell={"exit_at_session_end": True, "flat_time_min": 1260}),
     }
 )  # fmt: skip
+
+
+# Higher-timeframe RSI / trend variants, on the control (risk1) and on the full
+# breakout model. Needs 4h data downloaded for every pair.
+def _h(base_buy, base_sell, **over):
+    return {
+        "buy": {**base_buy, **over.get("buy", {})},
+        "sell": {**base_sell, **over.get("sell", {})},
+    }
+
+
+RSI1H = {"use_rsi_filter": True, "rsi_timeframe": "1h"}
+RSI4H = {"use_rsi_filter": True, "rsi_timeframe": "4h"}
+RSI1H_65 = {**RSI1H, "rsi_overbought": 65, "rsi_oversold": 35}
+RSI4H_60 = {**RSI4H, "rsi_overbought": 60, "rsi_oversold": 40}
+VARIANTS.update(
+    {
+        "h_ctrl_rsi1h_70_30": _h(RISK, {}, buy=RSI1H),
+        "h_ctrl_rsi1h_65_35": _h(RISK, {}, buy=RSI1H_65),
+        "h_ctrl_rsi4h_70_30": _h(RISK, {}, buy=RSI4H),
+        "h_ctrl_rsi4h_60_40": _h(RISK, {}, buy=RSI4H_60),
+        "h_ctrl_rsi5m_70_30": _h(RISK, {}, buy={"use_rsi_filter": True, "rsi_timeframe": "5m"}),
+        "h_ctrl_trend4h": _h(RISK, {}, buy={"use_trend_filter": True, "trend_timeframe": "4h"}),
+        "h_brk_rsi1h_65_35": _h(T_BUY, T_SELL, buy=RSI1H_65),
+        "h_brk_rsi4h_60_40": _h(T_BUY, T_SELL, buy=RSI4H_60),
+        "h_brk_trend4h": _h(T_BUY, T_SELL, buy={"use_trend_filter": True, "trend_timeframe": "4h"}),
+        "h_brk_trend4h_rsi1h": _h(
+            T_BUY, T_SELL,
+            buy={"use_trend_filter": True, "trend_timeframe": "4h", **RSI1H_65},
+        ),
+    }
+)  # fmt: skip
+HTF_SET = [
+    "risk1", "h_ctrl_rsi1h_70_30", "h_ctrl_rsi1h_65_35", "h_ctrl_rsi4h_70_30", "h_ctrl_rsi4h_60_40",
+    "h_ctrl_rsi5m_70_30", "h_ctrl_trend4h", "t_base", "h_brk_rsi1h_65_35", "h_brk_rsi4h_60_40",
+    "h_brk_trend4h", "h_brk_trend4h_rsi1h",
+]  # fmt: skip
+
 TIMING_SET = [
     "t_base", "t_asia01_08", "t_asia00_08", "t_london_07_09", "t_london_08_11",
     "t_ny_1230_1430", "t_ny_1330_1600", "t_ny_1430_1700", "t_london_only", "t_ny_only",
@@ -247,6 +285,9 @@ def main() -> None:
     )
     p.add_argument("--entry-set", action="store_true", help="run the breakout-entry variants")
     p.add_argument("--timing-set", action="store_true", help="run the session-window variants")
+    p.add_argument(
+        "--htf-set", action="store_true", help="run the higher-timeframe RSI/trend variants"
+    )
     args = p.parse_args()
 
     if not Path(CONFIG).is_file():
@@ -260,7 +301,7 @@ def main() -> None:
 
     sets = {
         "trend_set": TREND_SET, "enhance_set": ENHANCE_SET,
-        "entry_set": ENTRY_SET, "timing_set": TIMING_SET,
+        "entry_set": ENTRY_SET, "timing_set": TIMING_SET, "htf_set": HTF_SET,
     }  # fmt: skip
     chosen = [v for k, v in sets.items() if getattr(args, k)]
     names = args.only or (chosen[0] if chosen else list(VARIANTS))
