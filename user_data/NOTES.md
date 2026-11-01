@@ -586,6 +586,42 @@ Expect roughly 150–300 trades per pair-year (one per session at most). The
 volume filter is the part most likely to matter on real data: synthetic volume
 is random, so it was only checked for correctness, not for effect.
 
+### SessionMomentum results: fails on three of four columns
+
+Profit factor, run on the Mac (18 variants; selected rows, full grid in the run log):
+
+| Variant | SUI 2024-25 | SUI 2025-26 | BTC 2024-25 | BTC 2025-26 | Min |
+|---|---|---|---|---|---|
+| m_base | 1.19 | 0.53 | 0.67 | 0.64 | 0.53 |
+| m_no_volume | 0.93 | 0.71 | 0.79 | 0.66 | **0.66** |
+| m_disp1.5 | 1.23 | 0.43 | 0.63 | 0.60 | 0.43 |
+| m_trend1h | 1.10 | 0.63 | 0.69 | 0.69 | 0.63 |
+| m_trend4h_rsi1h | 1.12 | 0.68 | 0.70 | 0.59 | 0.59 |
+| m_stop_mid | 1.35 | 0.62 | 0.71 | 0.86 | 0.62 |
+| m_tp2 | 1.10 | 0.37 | 0.69 | 0.71 | 0.37 |
+| m_trail2atr | 0.37 | 0.33 | 0.33 | 0.39 | 0.33 |
+| m_flat1700 | 1.22 | 0.46 | 0.69 | 0.64 | 0.46 |
+| m_all | 0.33 | 0.40 | 0.32 | 0.38 | 0.32 |
+
+* **Breakouts work on SUI 2024-25 only** (most variants above 1.0 there, London PF
+  up to 1.6) and lose everywhere else. That is the mirror image of the sweep
+  results, which were best on SUI 2025-26: each idea has one good year and it is
+  not the same year. Neither is an edge; both are regime luck.
+* **Wider stop (Asia mid) is the only change that helps in every column** (0.62–1.35
+  vs 0.53–1.19), by lifting the win rate from ~25% to 35–50%. Still below 1 in three.
+* **The ATR trail is a design mistake, not a tuning one.** 2 × ATR on 5m candles is
+  about 0.3% of price while the initial risk is ~1%, so once a trade is 1R up the
+  trail sits almost at the market and caps winners near 0.7R while losers still
+  lose 1R: PF ≈ 0.36 × 0.7 / 0.64 ≈ 0.4, exactly what the grid shows. A trail
+  should be expressed in R or in higher-timeframe ATR. Left as is, documented.
+* The volume filter did not help; removing it gives the best minimum (0.66).
+
+**Final conclusion across both families:** fading the Asia range (31 rule sets)
+and trading its break (18 rule sets) both fail on 2 pairs × 2 years. The Asia
+range on 5m Binance perpetuals does not carry a tradable edge in either direction
+with these tools. Further work should change the *information* used (order flow,
+funding, open interest, cross-pair context), not the rules around the same levels.
+
 ## 4f. 1-hour versions: `SessionSweep1h` and `SessionMomentum1h`
 
 Both are thin subclasses that keep every rule, parameter and callback of the 5m
