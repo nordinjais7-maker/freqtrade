@@ -61,14 +61,19 @@ def _get(session: requests.Session, path: str, params: dict) -> list:
     raise RuntimeError(f"OKX {path}: still rate-limited after retries")
 
 
-def _paged(session, path: str, params: dict, stop_ts: int | None, max_pages: int) -> list:
-    """Walk back in time with `end=` until no rows, a short page, or stop_ts reached."""
+def _paged(
+    session, path: str, params: dict, stop_ts: int | None, max_pages: int, cursor: str = "end"
+) -> list:
+    """Walk back in time until no rows, a short page, or stop_ts reached.
+
+    Rubik endpoints page with `end=<ts>`; funding-rate-history uses `after=<ts>`.
+    """
     rows: list = []
     end = None
     for _ in range(max_pages):
         p = dict(params, limit=100)
         if end:
-            p["end"] = end
+            p[cursor] = end
         page = _get(session, path, p)
         time.sleep(PAUSE)
         if not page:
@@ -121,7 +126,8 @@ def collect(insts: list[str], periods: list[str], max_pages: int = 30) -> None:
                 first = pd.to_datetime(df["ts"].min(), unit="ms", utc=True)
                 print(f"{f.name}: +{added} rows (file {total}, API reached back to {first:%Y-%m-%d %H:%M})")
         f = OUT / f"{inst}_funding.csv"
-        rows = _paged(s, "/api/v5/public/funding-rate-history", {"instId": inst}, _last_ts(f), 30)
+        rows = _paged(s, "/api/v5/public/funding-rate-history", {"instId": inst}, _last_ts(f), 30,
+                       cursor="after")
         if rows:
             df = pd.DataFrame(
                 {"ts": [int(r["fundingTime"]) for r in rows],
