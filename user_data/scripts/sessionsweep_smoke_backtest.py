@@ -84,6 +84,16 @@ def write_data(datadir: Path, days: int, seed: int) -> None:
     btc1h.to_feather(fut / "BTC_USDT_USDT-1h-futures.feather")
     btc1h.to_feather(fut / "BTC_USDT_USDT-1h-mark.feather")
 
+    # Synthetic 5m taker-buy volume (FlushReversal): the taker share leans with the
+    # candle's own return, so large moves tend to carry one-sided aggressor flow.
+    trng = np.random.default_rng(seed + 3)
+    ret = np.log(df5["close"]).diff().fillna(0).to_numpy()
+    share = np.clip(0.5 + 40 * ret + trng.normal(0, 0.05, len(df5)), 0.02, 0.98)
+    taker_dir = datadir / "binance_taker"
+    taker_dir.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(
+        {"date": df5["date"], "volume": df5["volume"], "taker_buy_volume": df5["volume"] * share}
+    ).to_feather(taker_dir / "SUIUSDT_5m.feather")
     # Synthetic hourly flow (long/short ratio + open interest) in the okx_flow schema,
     # for SuiFlushShort smoke tests (set SUIFLUSH_FLOW_FILE to this path).
     flow_dir = datadir / "okx_flow"

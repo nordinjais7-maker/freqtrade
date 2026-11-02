@@ -40,9 +40,13 @@ import robustness
 
 
 CONFIG = "user_data/config_sessionsweep.json"
-CONFIGS = {"SuiFlushShort": "user_data/config_suiflush.json"}  # others use CONFIG
+CONFIGS = {
+    "SuiFlushShort": "user_data/config_suiflush.json",
+    "FlushReversal": "user_data/config_flushrev.json",
+}  # others use CONFIG
 RESULTS_DIR = Path("user_data/backtest_results")
 TIMEFRAME_DETAIL = ""  # set from --timeframe-detail
+FEE = ""  # set from --fee (per side), e.g. 0.0007 for the cost stress test
 # Set from --strategy in main(); SessionSweep variants are the module-level tables,
 # SessionMomentum variants live in MOMENTUM_VARIANTS.
 STRATEGY = "SessionSweep"
@@ -268,6 +272,23 @@ FLUSH_VARIANTS: dict[str, dict] = {
 }  # fmt: skip
 FLUSH_SET = list(FLUSH_VARIANTS)
 
+# ---------------------------------------------------------------------------
+# FlushReversal (pre-registered, NOTES.md §4h). The 8-cell grid k x p x e, and
+# for each cell the low-flow mechanism control with identical moves and exits.
+# ---------------------------------------------------------------------------
+FLUSHREV_VARIANTS: dict[str, dict] = {}
+for _k in (2.5, 3.0):
+    for _p in (90, 95):
+        for _e in (0.0, 0.25):
+            _name = f"fr_k{_k}_p{_p}_e{_e}"
+            _buy = {"k_sigma": _k, "flow_pct": _p, "entry_atr": _e}
+            FLUSHREV_VARIANTS[_name] = {"buy": {**_buy, "flow_mode": "high"}}
+            FLUSHREV_VARIANTS[_name + "_ctrl"] = {"buy": {**_buy, "flow_mode": "low"}}
+            FLUSHREV_VARIANTS[_name + "_tick"] = {
+                "buy": {**_buy, "flow_mode": "high", "fill_through_ticks": 1}
+            }
+FLUSHREV_GRID = [n for n in FLUSHREV_VARIANTS if not n.endswith(("_ctrl", "_tick"))]
+
 TIMING_SET = [
     "t_base", "t_asia01_08", "t_asia00_08", "t_london_07_09", "t_london_08_11",
     "t_ny_1230_1430", "t_ny_1330_1600", "t_ny_1430_1700", "t_london_only", "t_ny_only",
@@ -295,6 +316,8 @@ def run_backtest(timerange: str, label: str, pair: str) -> Path:
     ]  # fmt: skip
     if TIMEFRAME_DETAIL:
         cmd += ["--timeframe-detail", TIMEFRAME_DETAIL]
+    if FEE:
+        cmd += ["--fee", FEE]
     proc = subprocess.run(cmd, check=False, capture_output=True, text=True)
     if proc.returncode != 0:
         print(proc.stdout[-3000:], proc.stderr[-3000:], sep="\n")
@@ -383,6 +406,14 @@ def print_table(rows: dict[str, dict]) -> None:
     print("balance at the configured leverage, so compare PF and win% first.")
 
 
+def _variant_table(strategy: str) -> dict[str, dict]:
+    if strategy.startswith("SessionMomentum"):
+        return MOMENTUM_VARIANTS
+    return {"SuiFlushShort": FLUSH_VARIANTS, "FlushReversal": FLUSHREV_VARIANTS}.get(
+        strategy, VARIANTS
+    )
+
+
 def main() -> None:
     p = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
@@ -414,9 +445,12 @@ def main() -> None:
     p.add_argument(
         "--strategy", default="SessionSweep",
         choices=["SessionSweep", "SessionMomentum", "SessionSweep1h", "SessionMomentum1h",
-                 "SuiFlushShort"],
+                 "SuiFlushShort", "FlushReversal"],
         help="which strategy's variant table to use (default SessionSweep)",
     )  # fmt: skip
+    p.add_argument(
+        "--fee", default="", help="fee ratio per side passed to backtesting (cost stress test)"
+    )
     p.add_argument(
         "--timeframe-detail", default="",
         help="pass a detail timeframe (e.g. 1m) to backtesting for intra-candle exits",
@@ -426,15 +460,13 @@ def main() -> None:
         help="skip the permutation / bootstrap / fold / regime robustness tables",
     )  # fmt: skip
     args = p.parse_args()
-    global STRATEGY, PARAM_FILE, VARIANTS, CONFIG, TIMEFRAME_DETAIL
+    global STRATEGY, PARAM_FILE, VARIANTS, CONFIG, TIMEFRAME_DETAIL, FEE
     STRATEGY = args.strategy
     PARAM_FILE = Path(f"user_data/strategies/{STRATEGY}.json")
     CONFIG = CONFIGS.get(STRATEGY, CONFIG)
     TIMEFRAME_DETAIL = args.timeframe_detail
-    if STRATEGY.startswith("SessionMomentum"):
-        VARIANTS = MOMENTUM_VARIANTS
-    elif STRATEGY == "SuiFlushShort":
-        VARIANTS = FLUSH_VARIANTS
+    FEE = args.fee
+    VARIANTS = _variant_table(STRATEGY)
 
     if not Path(CONFIG).is_file():
         raise SystemExit("Run this from the freqtrade repository root.")
@@ -453,7 +485,8 @@ def main() -> None:
     chosen = [v for k, v in sets.items() if getattr(args, k)]
     if not STRATEGY.startswith("SessionSweep") and chosen:
         sys.exit("The --*-set options are SessionSweep tables; use --only or no set here.")
-    names = args.only or (chosen[0] if chosen else list(VARIANTS))
+    default_names = FLUSHREV_GRID if STRATEGY == "FlushReversal" else list(VARIANTS)
+    names = args.only or (chosen[0] if chosen else default_names)
     unknown = [n for n in names if n not in VARIANTS]
     if unknown:
         sys.exit(f"Unknown variants for {STRATEGY}: {unknown}")

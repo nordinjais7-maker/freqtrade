@@ -10,6 +10,7 @@ Session-timing liquidity-sweep strategy for Freqtrade, built for
 | `user_data/strategies/SessionSweep1h.py`, `SessionMomentum1h.py` | The same two strategies on 1-hour candles (section 4f) |
 | `user_data/strategies/SuiFlushShort.py`, `config_suiflush.json` | The uploaded SUI flush-short playbook port, reviewed and extended (section 4g) |
 | `user_data/scripts/fetch_okx_flow.py`, `fetch_binance_flow.py` | Hourly long/short-ratio + open-interest history from OKX (~60 days) or Binance (years) |
+| `user_data/strategies/FlushReversal.py`, `config_flushrev.json`, `scripts/fetch_binance_taker.py` | Limit-order fade after taker-driven flushes, pre-registered (section 4h) |
 | `user_data/config_sessionsweep.json` | Futures / isolated / dry-run config, 1 open trade, **API keys are placeholders** |
 | `user_data/scripts/sessionsweep_backtest.sh` | Exact download + backtest + session-split commands for your Mac |
 | `user_data/scripts/sessionsweep_variants.py` | Runs a batch of parameter variants and prints one comparison table |
@@ -1024,6 +1025,109 @@ on BTC the break loses in every period and the filter cannot rescue it. The
 strategy is not a tradable edge. The one thing worth keeping is cheap: run
 `fetch_okx_flow.py` weekly so that, in six months, the OKX rule can be judged on
 data it has never seen.
+
+## 4h. FlushReversal: pre-registered test of the research report's top candidate
+
+Source: `reports/BTC SUI futures orderflow edges.md`, candidate 1. Strategy
+`user_data/strategies/FlushReversal.py`, config `user_data/config_flushrev.json`,
+taker data from `user_data/scripts/fetch_binance_taker.py`.
+
+**This section is the pre-registration. It was committed before any real BTC or
+SUI data was loaded into the strategy.** The commit that adds it is the record;
+nothing below may change after results are seen.
+
+### Rules (fixed)
+
+* 5m candles. Event: the 15-minute return (3 candles) is at least *k* × its
+  trailing 7-day standard deviation, and the taker share of those 15 minutes'
+  volume in the move's direction is at or above its trailing 7-day *p*-th
+  percentile. Taker-buy volume comes from Binance kline archives.
+* Fade it with a limit order at the event close moved *e* × ATR(14) further in the
+  move's direction, valid 15 minutes. Take profit at 50% retracement of the move,
+  stop 1.0 × the move's 3-candle range beyond its extreme, 60-minute time stop.
+  No entries within 10 minutes of 00:00, 08:00 or 16:00 UTC funding.
+* 1% of equity at risk, 3× isolated, max 1 open trade.
+
+**Deviation from the report, decided before data:** both trailing windows are
+7 days, not 7 and 30. Freqtrade caps Binance 5m startup history at 2,494 candles
+(about 8.7 days), so a 30-day window cannot run live.
+
+**Cost model.** Freqtrade charges one fee rate on both legs. With no `--fee` it
+uses Binance's worst case, 0.05% per side: 3 bp more than the report's maker
+entry, and no exit slippage. The stress run uses `--fee 0.0007` per side, about
+4 bp more per round trip. Freqtrade fills limits on touch; the `_tick` variants
+require price to trade one tick through.
+
+Verified on synthetic data: every event meets the move and flow rules; flow
+thresholds use only earlier candles; no entry falls within 10 minutes of funding;
+entries fill at the limit or better; stops fill exactly and targets within 0.11%;
+no trade exceeds 60 minutes; stop losses are 1.05% of equity; unfilled orders
+expire; the low-flow control selects disjoint events of the same size; no taker
+file means no trades.
+
+### Protocol
+
+1. **Design window**, both pairs, three half-years: 2023-05-12 → 2023-12-31,
+   2024-01-01 → 2024-06-30, 2024-07-01 → 2024-12-31. Run the 8-cell grid
+   (*k* ∈ {2.5, 3.0}, *p* ∈ {90, 95}, *e* ∈ {0, 0.25}).
+2. **Selection rule:** one cell for both pairs, the one with the highest median
+   profit factor across the six pair-half-year columns. Ties go to the cell with
+   more trades. Record the choice in this file before step 3.
+3. **Out of sample, one run only**, 2025-01-01 → 2025-12-31 and 2026-01-01 →
+   2026-10-31, both pairs: the selected cell, its `_ctrl` (low-flow control) and
+   its `_tick` (fill-through) variants at default fees, then the selected cell
+   with `--fee 0.0007`. No re-tuning afterwards.
+
+### Pass rule (per pair; every line must hold)
+
+| Criterion | Threshold |
+|---|---|
+| Trades per OOS year | ≥ 75 |
+| Profit factor, each OOS year, default fees | ≥ 1.10 |
+| Robustness verdict across the two OOS years | WATCH or PASS |
+| Selected cell minus `_ctrl`, profit factor, each OOS year | ≥ +0.10 |
+| `_tick` variant profit factor, each OOS year | ≥ 1.05 |
+| `--fee 0.0007` stress, profit factor, each OOS year | ≥ 1.00 |
+
+A pass on SUI alone is reported as "SUI only, low power". A pass of any kind
+leads to a 6-month dry run (Nov 2026 → Apr 2027) whose rule is a mean net result
+per trade ≥ 0 and a live fill rate of at least 60% of the backtest's. Nothing
+goes live before that.
+
+### Commands (one at a time)
+
+Prepend 5m candles back to 2023 (5m from 2024-10 is already on disk):
+
+```bash
+freqtrade download-data -c user_data/config_flushrev.json --userdir user_data --pairs "SUI/USDT:USDT" "BTC/USDT:USDT" --timeframes 5m --trading-mode futures --timerange 20230420-20261031 --prepend
+```
+
+Taker-buy volume, about 5 minutes per symbol:
+
+```bash
+python user_data/scripts/fetch_binance_taker.py --symbol SUIUSDT --start 2023-04-20 --end 2026-10-31
+```
+
+```bash
+python user_data/scripts/fetch_binance_taker.py --symbol BTCUSDT --start 2023-04-20 --end 2026-10-31
+```
+
+Step 1, design window, 8 cells × 2 pairs × 3 half-years:
+
+```bash
+python user_data/scripts/sessionsweep_variants.py --strategy FlushReversal --pair SUI/USDT:USDT BTC/USDT:USDT --timerange 20230512-20231231 20240101-20240630 20240701-20241231
+```
+
+Step 3, out of sample. Replace `CELL` with the cell chosen in step 2, for
+example `fr_k2.5_p90_e0.0`:
+
+```bash
+python user_data/scripts/sessionsweep_variants.py --strategy FlushReversal --only CELL CELL_ctrl CELL_tick --pair SUI/USDT:USDT BTC/USDT:USDT --timerange 20250101-20251231 20260101-20261031
+```
+
+```bash
+python user_data/scripts/sessionsweep_variants.py --strategy FlushReversal --only CELL --fee 0.0007 --pair SUI/USDT:USDT BTC/USDT:USDT --timerange 20250101-20251231 20260101-20261031
+```
 
 ## 5. Comparing variants in one go
 
