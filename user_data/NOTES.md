@@ -998,6 +998,33 @@ Binance from 2025-01-24, OKX from 2026-09-03); given the control, a filter would
 need to turn PF 0.55 into 1.10 to pass, which no filter in this study has come
 close to.
 
+**BTC rerun (correct BTC flow data, commit 8b1b3e2):**
+
+| Variant | BTC 2024-25 | BTC 2025-26 | BTC Sep–Oct 2026 |
+|---|---|---|---|
+| f_bin_noflow (control) | 0.55 (683) | 0.62 (718) | 0.45 (109) |
+| f_bin_abs2.0 | 0.69 (60*) | 0.72 (202) | 0.15 (15, thin) |
+| f_bin_pct80 | 0.47 (150) | 0.61 (210) | |
+| f_okx_default | | | no trades |
+
+\* The Binance BTC file starts 2025-01-24 (a DNS failure on the first download
+skipped 97 days), so the 2024-25 column covers about nine months.
+
+* All variants fail; none reaches 0.75 in any full year.
+* The absolute ratio filter gives a small, consistent lift over the plain break on
+  BTC (0.55→0.69, 0.62→0.72), the only place in the study where a crowded-longs
+  filter helped in both years. It is far from enough.
+* OKX's BTC long/short ratio never reached 2.6 in its 60-day window, so the
+  playbook rule simply does not fire on BTC: the threshold is SUI-specific.
+
+## Final conclusion for SuiFlushShort
+
+On SUI the playbook replicates for its own two months and fails over two years;
+on BTC the break loses in every period and the filter cannot rescue it. The
+strategy is not a tradable edge. The one thing worth keeping is cheap: run
+`fetch_okx_flow.py` weekly so that, in six months, the OKX rule can be judged on
+data it has never seen.
+
 ## 5. Comparing variants in one go
 
 `user_data/scripts/sessionsweep_variants.py` runs a set of variants and prints one
