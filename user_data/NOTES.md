@@ -978,6 +978,26 @@ python user_data/scripts/sessionsweep_variants.py --strategy SuiFlushShort --onl
 python user_data/scripts/sessionsweep_variants.py --strategy SuiFlushShort --only f_okx_default f_bin_abs2.0 f_bin_noflow --timeframe-detail 1m --pair BTC/USDT:USDT --timerange 20260903-20261031
 ```
 
+**BTC results (first run).** The `git pull` before this run failed on a DNS error,
+so the backtests used the previous strategy version with SUI hardcoded as the flow
+instrument: the filtered rows below applied *SUI's* ratio to BTC trades and are
+confounded. The control does not read the flow data and is valid.
+
+| Variant | BTC 2024-25 | BTC 2025-26 | BTC Sep–Oct 2026 | Valid? |
+|---|---|---|---|---|
+| f_bin_noflow (plain 6h-low break) | 0.55 (683 trades) | 0.62 (718) | 0.45 (109) | yes |
+| f_bin_abs2.0 | 0.66 | 0.55 | 0.55 | no, SUI ratio |
+| f_bin_pct80 | 0.53 | 0.50 | | no, SUI ratio |
+| f_okx_default | | | 0.45 (60) | no, SUI ratio |
+
+Zero of five calendar folds profitable in both years for the control. **The plain
+break loses badly on BTC in every period, including the Sep–Oct 2026 window where
+it was mildly positive on SUI.** The playbook's break rule is not transferable.
+The filtered BTC rows must be rerun after pulling (BTC flow files are in place:
+Binance from 2025-01-24, OKX from 2026-09-03); given the control, a filter would
+need to turn PF 0.55 into 1.10 to pass, which no filter in this study has come
+close to.
+
 ## 5. Comparing variants in one go
 
 `user_data/scripts/sessionsweep_variants.py` runs a set of variants and prints one
