@@ -1302,6 +1302,34 @@ Observations, not changes to the protocol:
 * SUI always-on earned only 1.94% in 2023 because funding was often negative;
   switching helped there, which is why a switched rule won.
 
+### Out-of-sample result (2026-11-03): `switched_10` fails on both symbols
+
+Annualised net % / daily Sharpe / max drawdown %; last column is annualised net % at
+doubled costs. Pass needs ≥ 4% / ≥ 1.0 / ≥ −5% / > 0% in every year.
+
+| Symbol, year | Ann % | Sharpe | Max DD % | Ann % at 2× costs | Hedged % of hours | Verdict |
+|---|---|---|---|---|---|---|
+| BTC 2025 | 1.28 | 3.98 | -0.27 | 0.73 | 38 | fail (return) |
+| BTC 2026 (to Oct) | -0.03 | -0.17 | -0.13 | -0.31 | 5 | fail (return, Sharpe, 2× costs) |
+| SUI 2025 | -1.36 | -2.08 | -1.36 | -4.03 | 25 | fail (return, Sharpe, 2× costs) |
+| SUI 2026 (to Oct) | -0.81 | -1.62 | -0.89 | -2.36 | 14 | fail (return, Sharpe, 2× costs) |
+
+Verdict: **hypothesis rejected** for both symbols. No drawdown line was breached and
+`margin_ev` was 0; the failure is that funding no longer pays.
+
+For reference only (not selectable after the fact), every other rule also misses the
+4% line in every out-of-sample column. The best is `always_on` BTC 2025 at 3.54%,
+and `always_on` falls to 1.2-1.7% in 2026. Funding earned by an always-on hedge:
+BTC 13.1% of capital in 2024, then 3.8% in 2025 and 1.6% in 2026 to October; SUI
+18.2%, then 1.6% and 1.2%. That matches the research report's prediction of
+compressed BTC funding, and SUI compressed even further. The switched rules lost
+on SUI because brief funding spikes triggered round trips (10 for `switched_10` in
+2025) whose costs exceeded the funding they captured.
+
+Per the pre-registration, no re-tuning of thresholds on this data. Carry is
+not worth running at 2025-26 funding levels; revisit only if the 30-day
+average BTC funding is back above ~10% a year.
+
 ## 5. Comparing variants in one go
 
 `user_data/scripts/sessionsweep_variants.py` runs a set of variants and prints one
