@@ -1502,6 +1502,37 @@ final, rerun after `download-data ... --prepend` fills the funding and mark hist
 Freqtrade's own "Sharpe (closed trades) 0.11" and "Sharpe (daily wallet balance)
 1.16" are not comparable: both ignore open-position P&L. Use the rebuilt figure.
 
+#### Cross-check after filling the funding history: PASS (final)
+
+After `download-data --prepend` filled the 1h funding and mark history back to
+2021-06, the rebuild (which reads those files) gave Sharpe 0.819 vs 0.863, difference
+−0.044, within ±0.10. Funding in the rebuild rose to 1,952 USDT. Freqtrade reused its
+cached backtest (`--cache day`), so its fills are from the run without pre-2023-04
+funding; funding only enters the fills through the equity used for sizing (about 1%
+of equity), so this does not change the verdict.
+
+Remaining gap of ~0.04 Sharpe: Freqtrade sizes from its own equity estimate and fills
+at the daily open with contract-precision rounding; the simulation uses exact equity
+and the last 1h close. Both effects are small and go in either direction.
+
+### Dry run (pre-registered: six months from November 2026)
+
+Config: `user_data/config_dailytrend_dryrun.json`. Same strategy and parameters, but
+**cross margin** (with one position at ≤ 1.5x notional, liquidation would need a
+~65% fall in BTC, against ~45% for 2x isolated) and its own database
+`user_data/dailytrend_dryrun.sqlite`.
+
+Judged on execution, not profit (six months is too short for P&L to mean anything):
+
+* Every signal day produces the expected action (enter, rebalance, exit or nothing)
+  within the first hour after 00:00 UTC; no missed days.
+* Fill prices within 10 bp of the 00:00 UTC open on average.
+* Funding charged within 10% of rate × notional from Binance's published history.
+* Position size within 5% of the model's target after each rebalance.
+
+A dry run fills at the simulated order book, so it cannot measure real slippage. If
+the dry run passes, the next step is a small live allocation, judged the same way.
+
 ## 5. Comparing variants in one go
 
 `user_data/scripts/sessionsweep_variants.py` runs a set of variants and prints one
