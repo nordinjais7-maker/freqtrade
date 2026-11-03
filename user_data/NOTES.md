@@ -1094,6 +1094,38 @@ leads to a 6-month dry run (Nov 2026 → Apr 2027) whose rule is a mean net resu
 per trade ≥ 0 and a live fill rate of at least 60% of the backtest's. Nothing
 goes live before that.
 
+### Step 1 result: every setting loses in-sample
+
+Design window, profit factor, default fees (taker 0.05% per side):
+
+| Cell | SUI H2-23 | SUI H1-24 | SUI H2-24 | BTC H2-23 | BTC H1-24 | BTC H2-24 | Median |
+|---|---|---|---|---|---|---|---|
+| fr_k3.0_p95_e0.0 | 0.97 | 0.77 | 0.43 | 0.68 | 0.49 | 0.85 | **0.725** |
+| fr_k2.5_p90_e0.0 | 0.78 | 0.76 | 0.72 | 0.56 | 0.55 | 0.63 | 0.675 |
+| fr_k3.0_p90_e0.0 | 0.91 | 0.81 | 0.58 | 0.57 | 0.52 | 0.74 | 0.660 |
+| fr_k3.0_p95_e0.25 | 0.90 | 0.61 | 0.41 | 0.68 | 0.37 | 0.83 | 0.645 |
+| fr_k3.0_p90_e0.25 | 0.78 | 0.71 | 0.60 | 0.57 | 0.44 | 0.68 | 0.640 |
+| fr_k2.5_p90_e0.25 | 0.74 | 0.68 | 0.78 | 0.55 | 0.47 | 0.59 | 0.635 |
+| fr_k2.5_p95_e0.0 | 0.78 | 0.69 | 0.56 | 0.52 | 0.48 | 0.63 | 0.595 |
+| fr_k2.5_p95_e0.25 | 0.74 | 0.53 | 0.56 | 0.48 | 0.33 | 0.57 | 0.545 |
+
+**Step 2 selection (by the pre-registered rule): `fr_k3.0_p95_e0.0`.**
+
+What the design window shows:
+
+* No cell reaches PF 1.0 in any of the 48 cells. The best single cell is 0.97.
+* Win rates are 45–63%, so the reversal often happens, but losers outweigh
+  winners: the stop beyond the move's extreme and the 60-minute time stop give
+  away more than the 50% retracement target earns, after about 10 bp of fees.
+* Stronger, more one-sided flushes (k = 3, p = 95) do best, which is the
+  direction the research predicts, but the gradient is not enough to cross 1.0.
+* Waiting for a deeper limit (e = 0.25 ATR) is worse in every column: the best
+  reversals do not come back to the deeper price.
+
+The pre-registration requires one out-of-sample run regardless, so it is run as
+specified. A pass needs PF ≥ 1.10 in every pair-year; given an in-sample maximum
+of 0.97, it is expected to fail.
+
 ### Commands (one at a time)
 
 Prepend 5m candles back to 2023 (5m from 2024-10 is already on disk):
