@@ -228,8 +228,10 @@ def verdict(norm: pd.DataFrame, dbl: pd.DataFrame, tag: str) -> list[tuple[str, 
         (
             "maxDD <= 35% and <= 0.75 x C1",
             r["maxDD%"] >= -35 and r["maxDD%"] >= 0.75 * c1["maxDD%"],
-            f"{r['maxDD%']:.1f}% (C1 {c1['maxDD%']:.1f}%, "
-            f"limit {max(-35, 0.75 * c1['maxDD%']):.1f}%)",
+            (
+                f"{r['maxDD%']:.1f}% (C1 {c1['maxDD%']:.1f}%, "
+                f"limit {max(-35, 0.75 * c1['maxDD%']):.1f}%)"
+            ),
         ),
         ("worst calendar year >= -20%", worst >= -20, f"{worst:.1f}%"),
         (
