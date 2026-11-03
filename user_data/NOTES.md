@@ -11,6 +11,7 @@ Session-timing liquidity-sweep strategy for Freqtrade, built for
 | `user_data/strategies/SuiFlushShort.py`, `config_suiflush.json` | The uploaded SUI flush-short playbook port, reviewed and extended (section 4g) |
 | `user_data/scripts/fetch_okx_flow.py`, `fetch_binance_flow.py` | Hourly long/short-ratio + open-interest history from OKX (~60 days) or Binance (years) |
 | `user_data/strategies/FlushReversal.py`, `config_flushrev.json`, `scripts/fetch_binance_taker.py` | Limit-order fade after taker-driven flushes, pre-registered (section 4h) |
+| `user_data/scripts/carry_backtest.py` | Standalone spot-long / perp-short funding-carry backtest, pre-registered (section 4i) |
 | `user_data/config_sessionsweep.json` | Futures / isolated / dry-run config, 1 open trade, **API keys are placeholders** |
 | `user_data/scripts/sessionsweep_backtest.sh` | Exact download + backtest + session-split commands for your Mac |
 | `user_data/scripts/sessionsweep_variants.py` | Runs a batch of parameter variants and prints one comparison table |
@@ -1198,6 +1199,83 @@ python user_data/scripts/sessionsweep_variants.py --strategy FlushReversal --onl
 
 ```bash
 python user_data/scripts/sessionsweep_variants.py --strategy FlushReversal --only CELL --fee 0.0007 --pair SUI/USDT:USDT BTC/USDT:USDT --timerange 20250101-20251231 20260101-20261031
+```
+
+## 4i. Funding-rate carry: pre-registered test
+
+The research report's one approach with documented after-cost returns is
+delta-neutral funding carry (He, Manela, Ross & von Wachter report a Sharpe
+of about 1.8 for BTC under retail costs, in an earlier period; the premium
+has been declining). It is not a directional strategy: buy q units on spot,
+short q units of the perp, collect funding when it is positive.
+
+Freqtrade cannot hold that two-leg position, so it is tested with a standalone
+hourly simulator, `user_data/scripts/carry_backtest.py`, which downloads Binance
+spot 1h, perp 1h and funding history from data.binance.vision.
+
+**This section is the pre-registration, committed before any real carry data
+was loaded.**
+
+### Rules (fixed)
+
+* Position per 1 USDT of capital: spot notional = 1 / (1 + 1/L) and an equal perp
+  short, with the perp leg at leverage L = 2 (margin = notional / 2).
+* `always_on`: hedged for the whole window.
+* `switched_X` for X ∈ {5%, 10%, 20%}: at each funding settlement take the mean of
+  the last 9 settled rates, annualised. Enter when it is above X, exit when it is
+  below X/4. Executed at the next hour's close, using only settled rates.
+* Costs per leg per side: spot taker 0.10%, perp taker 0.05%, slippage 1 bp (BTC)
+  or 3 bp (SUI). Fee stress: all costs × 2 (`--fee-mult 2`).
+* Not modelled: liquidation, exchange or counterparty risk, auto-deleveraging,
+  transfers between spot and futures wallets. The output counts `margin_ev`, the
+  times the perp leg's loss would have used more than 80% of its margin before a
+  daily rebalance.
+
+Verified on hand-built data: a perfect hedge has zero price P&L; funding income
+matches the closed-form amount; final equity equals funding minus costs plus
+basis; entries and exits occur exactly one hour after the signal crosses;
+spot archives with microsecond timestamps parse correctly.
+
+### Protocol
+
+1. **Design**, both symbols: 2023-05-12 → 2023-12-31 and 2024-01-01 → 2024-12-31.
+2. **Selection:** the rule with the highest *minimum* Sharpe across the four
+   design columns; ties go to the higher minimum annualised return. Record it
+   here before step 3.
+3. **Out of sample, one run:** 2025-01-01 → 2025-12-31 and 2026-01-01 → 2026-10-31,
+   both symbols, the selected rule at normal and doubled costs.
+
+### Pass rule (per symbol; every line must hold)
+
+| Criterion | Threshold |
+|---|---|
+| Annualised net return, each OOS year | ≥ 4% on capital |
+| Daily Sharpe, each OOS year | ≥ 1.0 |
+| Max drawdown, each OOS year | no worse than −5% |
+| Doubled costs, annualised net return, each OOS year | > 0% |
+
+4% is roughly what a stablecoin savings product pays; carry that does not beat
+it is not worth the exchange risk. Expectation stated before running: BTC
+funding has been compressed since 2024, so BTC may fall short of 4%; SUI
+funding is higher but swings negative more often.
+
+### Commands (one at a time)
+
+Downloads about 3 years of spot, perp and funding history for both symbols
+(cached under `user_data/data/carry/`), then runs the design window:
+
+```bash
+python user_data/scripts/carry_backtest.py --symbol BTCUSDT SUIUSDT --start 2023-05 --end 2026-10 --periods 2023-05-12:2023-12-31 2024-01-01:2024-12-31
+```
+
+Out of sample, after the selection is recorded:
+
+```bash
+python user_data/scripts/carry_backtest.py --symbol BTCUSDT SUIUSDT --start 2023-05 --end 2026-10 --periods 2025-01-01:2025-12-31 2026-01-01:2026-10-31
+```
+
+```bash
+python user_data/scripts/carry_backtest.py --symbol BTCUSDT SUIUSDT --start 2023-05 --end 2026-10 --fee-mult 2 --periods 2025-01-01:2025-12-31 2026-01-01:2026-10-31
 ```
 
 ## 5. Comparing variants in one go
