@@ -13,6 +13,7 @@ Session-timing liquidity-sweep strategy for Freqtrade, built for
 | `user_data/strategies/FlushReversal.py`, `config_flushrev.json`, `scripts/fetch_binance_taker.py` | Limit-order fade after taker-driven flushes, pre-registered (section 4h) |
 | `user_data/strategies/DailyTrend.py` | Freqtrade version of the section 4j long/flat trend ensemble (vol-targeted, rebalancing band) |
 | `user_data/scripts/trend_crosscheck.py` | Rebuilds DailyTrend's daily equity from backtest orders and compares it with `trend_backtest.py` |
+| `user_data/scripts/dryrun_score.py` | Scores the DailyTrend dry runs (BTC and SUI) against the four execution criteria in section 4j |
 | `user_data/scripts/trend_backtest.py` | Standalone daily trend-ensemble backtest with vol-targeting and controls, pre-registered (section 4j) |
 | `user_data/scripts/carry_backtest.py` | Standalone spot-long / perp-short funding-carry backtest, pre-registered (section 4i) |
 | `user_data/config_sessionsweep.json` | Futures / isolated / dry-run config, 1 open trade, **API keys are placeholders** |
@@ -1578,6 +1579,19 @@ wallet (margin at 2x), i.e. about 0.27x notional.
 
 Decision: an exploratory SUI dry run alongside BTC, judged on the same execution
 criteria. It cannot validate the rule on SUI.
+
+#### Scoring the dry runs
+
+`user_data/scripts/dryrun_score.py` reads each bot's SQLite database read-only (safe
+while the bots run) plus Binance's public daily candles and funding history, and
+prints PASS / FAIL / ---- (not enough activity yet) for the four criteria above.
+The model target is computed with the same code as `trend_backtest.py`. Tested on a
+synthetic database: correct behaviour passes; an injected late fill and missing
+funding are both caught.
+
+```bash
+python user_data/scripts/dryrun_score.py
+```
 
 ## 5. Comparing variants in one go
 
