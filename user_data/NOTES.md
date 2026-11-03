@@ -1482,6 +1482,26 @@ freqtrade backtesting --config user_data/config_dailytrend.json --userdir user_d
 python user_data/scripts/trend_crosscheck.py
 ```
 
+#### Cross-check on real data (2026-11-03): PASS, provisional
+
+| | Sharpe | Ann % | Max DD % | Final (x start) |
+|---|---|---|---|---|
+| Freqtrade DailyTrend (rebuilt daily equity) | 0.834 | 14.6 | -16.9 | 1.937 |
+| trend_backtest.py (LF ensemble) | 0.863 | 15.1 | -16.7 | 1.975 |
+
+Difference −0.029 (limit ±0.10). 48 trades, 182 fills, fees 806 USDT, funding 1,797
+USDT (rebuild) vs 1,871 (Freqtrade's double count at fill timestamps).
+
+Caveat: the local Freqtrade 1h funding-rate and mark files started at 2023-04-20
+(earlier downloads), so the Freqtrade run had no funding before that date, while the
+simulation had full funding. The missing period is mostly the 2022 bear market, when
+the strategy was largely flat, so the effect should be small, and it would make
+Freqtrade look better, not worse; Freqtrade still came out slightly below. To be
+final, rerun after `download-data ... --prepend` fills the funding and mark history.
+
+Freqtrade's own "Sharpe (closed trades) 0.11" and "Sharpe (daily wallet balance)
+1.16" are not comparable: both ignore open-position P&L. Use the rebuilt figure.
+
 ## 5. Comparing variants in one go
 
 `user_data/scripts/sessionsweep_variants.py` runs a set of variants and prints one
