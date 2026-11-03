@@ -1278,6 +1278,30 @@ python user_data/scripts/carry_backtest.py --symbol BTCUSDT SUIUSDT --start 2023
 python user_data/scripts/carry_backtest.py --symbol BTCUSDT SUIUSDT --start 2023-05 --end 2026-10 --fee-mult 2 --periods 2025-01-01:2025-12-31 2026-01-01:2026-10-31
 ```
 
+### Design result and selection (2026-11-03, recorded before any out-of-sample run)
+
+Annualised net % / daily Sharpe / max drawdown %, normal costs:
+
+| Rule | BTC 2023 | BTC 2024 | SUI 2023 | SUI 2024 | Min Sharpe |
+|---|---|---|---|---|---|
+| always_on | 6.13 / 12.50 / -0.20 | 12.40 / 13.76 / -0.30 | 1.94 / 4.31 / -0.55 | 16.88 / 5.78 / -3.47 | 4.31 |
+| switched_5 | 4.41 / 7.75 / -0.68 | 10.67 / 12.27 / -0.29 | 3.37 / 2.56 / -2.03 | 10.60 / 5.90 / -1.93 | 2.56 |
+| **switched_10** | 4.65 / 9.34 / -0.25 | 8.95 / 10.23 / -0.31 | 5.71 / 5.69 / -0.76 | 11.47 / 6.78 / -1.77 | **5.69** |
+| switched_20 | 2.22 / 5.53 / -0.12 | 7.14 / 9.02 / -0.37 | 5.22 / 6.26 / -0.26 | 6.36 / 7.03 / -0.48 | 5.53 |
+
+**Selected: `switched_10`** (highest minimum Sharpe, 5.69; no tie). It goes to the
+out-of-sample run unchanged. `margin_ev` was 0 everywhere.
+
+Observations, not changes to the protocol:
+
+* Sharpe ratios of 4-14 come from a smooth, nearly riskless P&L path with no
+  liquidation, exchange or de-peg events in the sample. The Sharpe ≥ 1 line is
+  therefore easy; the 4% return line and the drawdown line are the ones that bind.
+* Funding contributed almost all of the return (basis ±0.5%). 2023 BTC already sat
+  near the 4% bar (4.65% selected); 2024 was the high-funding year.
+* SUI always-on earned only 1.94% in 2023 because funding was often negative;
+  switching helped there, which is why a switched rule won.
+
 ## 5. Comparing variants in one go
 
 `user_data/scripts/sessionsweep_variants.py` runs a set of variants and prints one
