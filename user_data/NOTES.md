@@ -1126,6 +1126,46 @@ The pre-registration requires one out-of-sample run regardless, so it is run as
 specified. A pass needs PF ≥ 1.10 in every pair-year; given an in-sample maximum
 of 0.97, it is expected to fail.
 
+### Step 3 result: fails every criterion; the flow condition makes it worse
+
+Out of sample, `fr_k3.0_p95_e0.0`, profit factor (trades):
+
+| Run | SUI 2025 | SUI 2026 YTD | BTC 2025 | BTC 2026 YTD |
+|---|---|---|---|---|
+| Selected cell, default fees | 0.74 (154) | 0.86 (127) | 0.59 (132) | 0.54 (147) |
+| `_ctrl`, low-flow control | 0.77 (79) | 1.29 (47) | 0.70 (29) | 0.93 (23) |
+| `_tick`, one-tick fill-through | 0.68 (148) | 0.82 (121) | 0.59 (131) | 0.49 (141) |
+| `--fee 0.0007` stress | 0.68 | 0.81 | 0.48 | 0.45 |
+
+Scored against the pre-registered table, per pair:
+
+| Criterion | SUI | BTC |
+|---|---|---|
+| ≥ 75 trades per year | pass | pass |
+| PF ≥ 1.10 each year | **fail** (0.74, 0.86) | **fail** (0.59, 0.54) |
+| Verdict WATCH or PASS | **fail** (FAIL) | **fail** (FAIL) |
+| Selected minus control ≥ +0.10 each year | **fail** (−0.03, −0.43) | **fail** (−0.11, −0.39) |
+| `_tick` PF ≥ 1.05 each year | **fail** | **fail** |
+| Fee stress PF ≥ 1.00 each year | **fail** | **fail** |
+
+**FlushReversal fails.** Every bootstrap PF band includes values below 1, no
+permutation p-value is below 0.76, and at most 2 of 5 calendar folds are
+profitable in any column.
+
+The most informative row is the control. The paper's mechanism says reversal
+should be *stronger* after taker-dominated moves. Here, same-size moves *without*
+dominant taker flow did better in all four out-of-sample columns, and in five of
+the six design-window columns where it was not run, the gradient in *p* was
+weak. On Binance 5m perps in 2023–2026, with candle-level taker data and limit
+entries at the signal close, conditioning on one-sided taker flow selects moves
+that are more likely to *continue*, not reverse. That matches Osler's
+stop-cascade finding better than the liquidity-premium reading. The control's
+own numbers (23–79 trades) are too thin to treat as a strategy.
+
+Caveat on fidelity: Freqtrade fills the limit on touch and charges the taker
+rate on both legs. The `_tick` row and the fee stress bracket those effects and
+both move results down, not up, so fill modelling does not explain the failure.
+
 ### Commands (one at a time)
 
 Prepend 5m candles back to 2023 (5m from 2024-10 is already on disk):
