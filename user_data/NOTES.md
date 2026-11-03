@@ -11,6 +11,7 @@ Session-timing liquidity-sweep strategy for Freqtrade, built for
 | `user_data/strategies/SuiFlushShort.py`, `config_suiflush.json` | The uploaded SUI flush-short playbook port, reviewed and extended (section 4g) |
 | `user_data/scripts/fetch_okx_flow.py`, `fetch_binance_flow.py` | Hourly long/short-ratio + open-interest history from OKX (~60 days) or Binance (years) |
 | `user_data/strategies/FlushReversal.py`, `config_flushrev.json`, `scripts/fetch_binance_taker.py` | Limit-order fade after taker-driven flushes, pre-registered (section 4h) |
+| `user_data/scripts/trend_backtest.py` | Standalone daily trend-ensemble backtest with vol-targeting and controls, pre-registered (section 4j) |
 | `user_data/scripts/carry_backtest.py` | Standalone spot-long / perp-short funding-carry backtest, pre-registered (section 4i) |
 | `user_data/config_sessionsweep.json` | Futures / isolated / dry-run config, 1 open trade, **API keys are placeholders** |
 | `user_data/scripts/sessionsweep_backtest.sh` | Exact download + backtest + session-split commands for your Mac |
@@ -1329,6 +1330,78 @@ on SUI because brief funding spikes triggered round trips (10 for `switched_10` 
 Per the pre-registration, no re-tuning of thresholds on this data. Carry is
 not worth running at 2025-26 funding levels; revisit only if the 30-day
 average BTC funding is back above ~10% a year.
+
+## 4j. Daily trend ensemble on BTC: pre-registered test
+
+Source: the research report `reports/Footprint and best crypto strategies.md`
+ranks slow daily trend following as the best-evidenced directional family
+(realistic net Sharpe 0.5-1.0, drawdowns 25-45%), and warns that volatility sizing
+alone may explain most of its benefit. Every parameter below comes from
+literature published before 2022, so 2022-01-01 → 2026-10-31 is post-publication
+data for BTC. **This section is committed before any real daily data is loaded.**
+
+Simulator: `user_data/scripts/trend_backtest.py` (standalone daily simulation,
+reusing the data.binance.vision loader and cache from `carry_backtest.py`).
+`--selftest` passes 7 synthetic checks: closed-form funding, 1x equivalence with
+buy-and-hold, exact entry cost, no look-ahead (changing later prices leaves earlier
+equity unchanged), the leverage cap, the funding day boundary, and bootstrap sanity.
+
+### Rules (fixed)
+
+* Daily close = last 1h perp close of the UTC day; signal computed on it and executed
+  at that price (= next day's open).
+* s = mean(sign(r20), sign(r60), sign(r120), sign(close − SMA50)) ∈ [−1, 1].
+  Long/flat (LF): exposure = max(s, 0). Long/short (LS): exposure = s.
+* Target notional = exposure × min(30% / vol30, 1.5) × equity; vol30 = 30-day std of
+  daily log returns × √365.
+* Rebalance only when |target − current| ≥ 0.20 × equity; a move to zero or a change of
+  sign is always executed. No stops, no other filters.
+* Costs: taker 0.05% + slippage 2 bp (BTC) / 5 bp (SUI) per side on traded notional;
+  stress case at 2×. Funding from Binance history, paid on each settlement at the perp
+  price.
+* Controls: C1 = the same sizing with s ≡ 1 (vol-targeted always-long); C2 = 1x perp
+  buy-and-hold with funding.
+
+### Pass rule (BTC, 2022-01-01 → 2026-10-31; LF and LS judged separately; every line)
+
+| Criterion | Threshold |
+|---|---|
+| Net daily Sharpe, annualised | ≥ 0.50 |
+| Stationary block bootstrap (20-day mean block, 10,000 draws), 10th percentile Sharpe | > 0 |
+| Sharpe − C1 Sharpe | ≥ +0.15 |
+| Max drawdown | ≤ 35% and ≤ 0.75 × C1's |
+| Worst calendar year (2022 … 2026 YTD) | no worse than −20% |
+| Doubled-cost Sharpe | ≥ 0.35 |
+| Each of the 4 components alone (same mapping and sizing) | ≥ 3 of 4 with Sharpe > 0 |
+
+* BTC 2020-02 → 2021-12 is printed as a code-sanity window only (starts when 120 days
+  of warm-up exist); it is not judged and nothing is tuned on it.
+* SUI from its first warm day to 2026-10-31 is report-only: "consistent" if Sharpe > 0,
+  never a pass.
+* Prior stated before running: 25-35% chance of passing; the C1 line is the most
+  likely to fail.
+* After a pass: six months of dry run, judged on execution (fills within 10 bp of the
+  modelled daily price, funding as modelled), not P&L. After a fail: no re-tuning on
+  this window; the conclusion is that no tested directional rule beats vol-targeted
+  holding for this account.
+
+### Deviations from the report's draft, decided before data
+
+* The report asked for a Freqtrade run that matches a pandas simulation within
+  0.1 Sharpe. Replaced by the synthetic self-tests above: Freqtrade cannot apply the
+  0.20-of-equity rebalancing band to a vol-targeted position without a custom
+  position-adjustment strategy that would itself need verifying, and the sandbox
+  cannot reach Binance data to cross-check it.
+* Prices are perp last-trade 1h closes, not mark prices (the cached archive has no
+  mark klines). Difference on daily bars is a few bp.
+* "Always execute a move to zero or a sign change" is added so that a flat signal
+  cannot leave a residual position below the 0.20 band.
+
+### Command (one run; downloads BTC from 2019-09 and reuses the SUI cache)
+
+```bash
+python user_data/scripts/trend_backtest.py
+```
 
 ## 5. Comparing variants in one go
 
