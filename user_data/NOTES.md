@@ -11,6 +11,8 @@ Session-timing liquidity-sweep strategy for Freqtrade, built for
 | `user_data/strategies/SuiFlushShort.py`, `config_suiflush.json` | The uploaded SUI flush-short playbook port, reviewed and extended (section 4g) |
 | `user_data/scripts/fetch_okx_flow.py`, `fetch_binance_flow.py` | Hourly long/short-ratio + open-interest history from OKX (~60 days) or Binance (years) |
 | `user_data/strategies/FlushReversal.py`, `config_flushrev.json`, `scripts/fetch_binance_taker.py` | Limit-order fade after taker-driven flushes, pre-registered (section 4h) |
+| `user_data/strategies/DailyTrend.py` | Freqtrade version of the section 4j long/flat trend ensemble (vol-targeted, rebalancing band) |
+| `user_data/scripts/trend_crosscheck.py` | Rebuilds DailyTrend's daily equity from backtest orders and compares it with `trend_backtest.py` |
 | `user_data/scripts/trend_backtest.py` | Standalone daily trend-ensemble backtest with vol-targeting and controls, pre-registered (section 4j) |
 | `user_data/scripts/carry_backtest.py` | Standalone spot-long / perp-short funding-carry backtest, pre-registered (section 4i) |
 | `user_data/config_sessionsweep.json` | Futures / isolated / dry-run config, 1 open trade, **API keys are placeholders** |
@@ -1441,6 +1443,44 @@ Caveats, stated with the pass:
 Next step per the pre-registration: six months of dry run, judged on execution,
 not P&L. Before that, a Freqtrade implementation should reproduce this result on the
 same window within 0.1 Sharpe, closing the cross-check dropped above.
+
+### Freqtrade implementation and cross-check (`DailyTrend`)
+
+`user_data/strategies/DailyTrend.py` implements the long/flat ensemble in Freqtrade
+with no new parameters: 1d timeframe, market orders at the next daily open, entry
+stake = target / leverage, `adjust_trade_position` for the 0.20-of-equity band, exit
+signal when exposure is 0, leverage 2 (isolated), notional ≤ 1.5x equity, no stops.
+Config: `user_data/config_dailytrend.json` (BTC, 10,000 USDT dry-run wallet,
+placeholder credentials).
+
+`user_data/scripts/trend_crosscheck.py` rebuilds daily mark-to-market equity from
+the backtest's filled orders and Freqtrade's own candles, mark and funding data
+(Freqtrade's report counts only realised profit, which says little for weeks-long
+positions), and compares its Sharpe with `trend_backtest.py`. Pass: |difference| ≤
+0.10 (the pre-registered tolerance).
+
+Synthetic check (random trending data, 2022-01 → 2026-10): 55 trades, 165 fills,
+Sharpe 0.050 vs 0.072, difference −0.023, PASS. Freqtrade's funding total was 5%
+higher than the rebuild's because it charges a settlement that falls exactly on a fill
+timestamp on both sides of the fill; Binance charges it once. This makes Freqtrade's
+own reported profit slightly pessimistic; the rebuild charges each settlement once.
+
+Liquidation note: at leverage 2 with isolated margin, a ~45% fall from the average
+entry would liquidate. At ≤ 1.5x notional, and with the volatility target and band,
+that never came close in the test window, but for live use cross margin or leverage
+3 with a smaller margin share would be safer choices to review before the dry run.
+
+```bash
+freqtrade download-data --config user_data/config_dailytrend.json --userdir user_data --pairs BTC/USDT:USDT --timeframes 1d --trading-mode futures --timerange 20210601-20261101
+```
+
+```bash
+freqtrade backtesting --config user_data/config_dailytrend.json --userdir user_data --strategy DailyTrend --timerange 20220101-20261101 --fee 0.0007 --export trades
+```
+
+```bash
+python user_data/scripts/trend_crosscheck.py
+```
 
 ## 5. Comparing variants in one go
 
