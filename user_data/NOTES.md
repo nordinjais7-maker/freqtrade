@@ -1154,9 +1154,8 @@ profitable in any column.
 
 The most informative row is the control. The paper's mechanism says reversal
 should be *stronger* after taker-dominated moves. Here, same-size moves *without*
-dominant taker flow did better in all four out-of-sample columns, and in five of
-the six design-window columns where it was not run, the gradient in *p* was
-weak. On Binance 5m perps in 2023–2026, with candle-level taker data and limit
+dominant taker flow did better in all four out-of-sample columns. (The control
+was not run on the design window, so this comparison exists only out of sample.) On Binance 5m perps in 2023–2026, with candle-level taker data and limit
 entries at the signal close, conditioning on one-sided taker flow selects moves
 that are more likely to *continue*, not reverse. That matches Osler's
 stop-cascade finding better than the liquidity-premium reading. The control's
