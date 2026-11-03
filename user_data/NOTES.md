@@ -1403,6 +1403,45 @@ equity unchanged), the leverage cap, the funding day boundary, and bootstrap san
 python user_data/scripts/trend_backtest.py
 ```
 
+### Result (2026-11-03): both ensembles PASS every pre-registered line on BTC
+
+BTC 2022-01-01 → 2026-10-31, normal costs (doubled-cost Sharpe in brackets):
+
+| Rule | Sharpe | Ann % | Max DD % | Boot 10th pct | Worst year | Components > 0 |
+|---|---|---|---|---|---|---|
+| LF ensemble | 0.86 (0.81) | 15.1 | -16.7 | 0.19 | -11.5% (2022) | 4/4 |
+| LS ensemble | 0.71 (0.63) | 16.4 | -26.6 | 0.12 | -9.2% (2022) | 4/4 |
+| C1 vol-target long | 0.33 (0.32) | 5.5 | -52.1 | -0.32 | -42.6% (2022) | n/a |
+| C2 1x buy-and-hold | 0.37 | 4.9 | -69.5 | n/a | -67.1% (2022) | n/a |
+
+Calendar years, LF: 2022 -11.5, 2023 +49.9, 2024 +50.9, 2025 -5.1, 2026 YTD +3.9.
+LS: -9.2, +47.6, +36.2, -0.6, +14.5. LF was in the market 43% of days; turnover 16x
+equity a year; costs -8.2% and funding -19.4% of starting capital over the window.
+
+SUI (report only, 2023-09-01 → 2026-10-31): LF Sharpe 0.85, max DD -16.6%; LS 0.70;
+C1 0.70 with max DD -39.9%. Label: **consistent** for both.
+
+Sanity window (BTC 2020-05 → 2021-12, not judged): LF 2.01, LS 1.84, C1 1.56.
+BTC perp archives start 2020-01, so this window began 2020-05-01.
+
+Caveats, stated with the pass:
+
+* The margin is thin where it matters: the bootstrap lower bounds (0.19, 0.12) are just
+  above zero, as the pre-registration expected for under five years of data.
+* The edge over C1 is mostly drawdown avoidance: the ensembles stepped aside in 2022
+  (-11.5% vs -42.6%) and captured most of 2023-24. In 2025-26 they were roughly flat,
+  as was BTC; there is no sign yet of an edge in sideways markets.
+* Two variants were tested with no multiple-testing correction (none was
+  pre-registered); both pass, so the choice does not change the verdict.
+* The parameters were taken from pre-2022 literature, but chosen in 2026 by someone
+  who knew that family had worked; some hindsight in the family choice cannot be
+  ruled out.
+* Verification was by synthetic self-tests, not an independent second implementation.
+
+Next step per the pre-registration: six months of dry run, judged on execution,
+not P&L. Before that, a Freqtrade implementation should reproduce this result on the
+same window within 0.1 Sharpe, closing the cross-check dropped above.
+
 ## 5. Comparing variants in one go
 
 `user_data/scripts/sessionsweep_variants.py` runs a set of variants and prints one
