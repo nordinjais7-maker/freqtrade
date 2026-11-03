@@ -1533,6 +1533,34 @@ Judged on execution, not profit (six months is too short for P&L to mean anythin
 A dry run fills at the simulated order book, so it cannot measure real slippage. If
 the dry run passes, the next step is a small live allocation, judged the same way.
 
+### SUI: exploratory only (decided 2026-11-03)
+
+The pre-registration allows SUI only a "consistent / inconsistent" label (it was
+consistent: LF Sharpe 0.85, max DD −16.6%, 2023-09 → 2026-10). SUI has about three
+years of history, one listing-era bull run (2024: +54%) and no pre-2022 data, so a
+SUI run cannot validate the rule; it can only show that the same code behaves on SUI.
+
+Same strategy, no changes. Config `user_data/config_dailytrend_sui.json` (SUI only,
+cross margin, own database `dailytrend_sui_dryrun.sqlite`, separate 10,000 USDT
+dry-run wallet). Costs: `--fee 0.001` (0.05% taker + 5 bp slippage, as in the
+simulation). Because SUI's volatility is 2-3x BTC's, the 30% volatility target keeps
+its position near 0.3-0.5x equity most of the time.
+
+Freqtrade window starts 2023-09-15 (SUI perp listed 2023-05-03; 130 startup candles).
+Cross-check tolerance as for BTC: |Sharpe difference| ≤ 0.10.
+
+```bash
+freqtrade download-data --config user_data/config_dailytrend_sui.json --userdir user_data --pairs SUI/USDT:USDT --timeframes 1d --trading-mode futures --timerange 20230501-20261101 --prepend
+```
+
+```bash
+freqtrade backtesting --config user_data/config_dailytrend_sui.json --userdir user_data --strategy DailyTrend --timerange 20230915-20261101 --fee 0.001 --export trades --cache none
+```
+
+```bash
+python user_data/scripts/trend_crosscheck.py --pair SUI/USDT:USDT --symbol SUIUSDT --start 2023-09-15 --fee 0.001
+```
+
 ## 5. Comparing variants in one go
 
 `user_data/scripts/sessionsweep_variants.py` runs a set of variants and prints one
