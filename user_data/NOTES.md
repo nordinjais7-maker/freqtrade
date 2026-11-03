@@ -1561,6 +1561,24 @@ freqtrade backtesting --config user_data/config_dailytrend_sui.json --userdir us
 python user_data/scripts/trend_crosscheck.py --pair SUI/USDT:USDT --symbol SUIUSDT --start 2023-09-15 --fee 0.001
 ```
 
+#### SUI result (2026-11-03, exploratory)
+
+| | Sharpe | Ann % | Max DD % | Final (x start) |
+|---|---|---|---|---|
+| Freqtrade DailyTrend on SUI (rebuilt) | 0.854 | 14.4 | -16.4 | 1.523 |
+| trend_backtest.py | 0.855 | 14.5 | -16.5 | 1.529 |
+
+Cross-check difference −0.001: PASS. 32 trades, 9 winners (28%), at most 10 losses in
+a row. Most of the gain came from one trend in late 2024; the balance then sat below
+its May 2025 peak until at least September 2026 (Freqtrade's closed-trade drawdown
+lasted 470 days). Freqtrade's per-trade "Avg profit 26.81%" and "Best trade 794%"
+are distorted by position adjustment (profit divided by the remaining stake after
+partial exits) and should be ignored. Average stake about 0.14 of the 10,000 USDT
+wallet (margin at 2x), i.e. about 0.27x notional.
+
+Decision: an exploratory SUI dry run alongside BTC, judged on the same execution
+criteria. It cannot validate the rule on SUI.
+
 ## 5. Comparing variants in one go
 
 `user_data/scripts/sessionsweep_variants.py` runs a set of variants and prints one
