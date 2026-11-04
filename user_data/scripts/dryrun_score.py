@@ -122,7 +122,15 @@ def load_db(path: Path, pair: str) -> tuple[pd.DataFrame, pd.DataFrame]:
 
 
 def bot_start(path: Path) -> pd.Timestamp:
-    """First time the bot ran: earliest wallet snapshot, else the file's creation time."""
+    """When the bot first ran: the database file's creation time (macOS records it).
+
+    Falls back to the earliest wallet snapshot, which Freqtrade may store per day
+    rather than per minute, so it is only used where no creation time exists.
+    """
+    st = path.stat()
+    born = getattr(st, "st_birthtime", None)
+    if born:
+        return pd.Timestamp(born, unit="s", tz="UTC")
     con = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
     try:
         t = con.execute("SELECT MIN(timestamp) FROM wallet_history").fetchone()[0]
@@ -131,13 +139,10 @@ def bot_start(path: Path) -> pd.Timestamp:
     finally:
         con.close()
     if t:
-        return (
-            pd.Timestamp(t, tz="UTC")
-            if not isinstance(t, (int, float))
-            else pd.Timestamp(t, unit="ms", tz="UTC")
-        )
-    st = path.stat()
-    return pd.Timestamp(getattr(st, "st_birthtime", st.st_mtime), unit="s", tz="UTC")
+        if isinstance(t, (int, float)):
+            return pd.Timestamp(t, unit="ms", tz="UTC")
+        return pd.Timestamp(t, tz="UTC")
+    return pd.Timestamp(st.st_mtime, unit="s", tz="UTC")
 
 
 # ---------------------------------------------------------------- scoring ------
@@ -166,7 +171,14 @@ def score(  # noqa: C901 - four independent checks, kept together for readabilit
 ) -> list[tuple[str, bool | None, str]]:
     target = model_target(daily)
     first_day = start.floor("D") + pd.Timedelta(days=1)
-    days = [d for d in daily.index if d >= first_day and bool(daily.loc[d, "complete"])]
+    # A day's action happens at its 00:00 UTC open, so it can be checked once the
+    # fill window has passed; the day itself need not be finished.
+    now = pd.Timestamp.now("UTC")
+    days = [
+        d
+        for d in daily.index
+        if d >= first_day and now >= d + pd.Timedelta(minutes=FILL_WINDOW_MIN)
+    ]
     res: list[tuple[str, bool | None, str]] = []
 
     # 1. missed days and late fills
