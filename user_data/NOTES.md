@@ -13,6 +13,7 @@ Session-timing liquidity-sweep strategy for Freqtrade, built for
 | `user_data/strategies/FlushReversal.py`, `config_flushrev.json`, `scripts/fetch_binance_taker.py` | Limit-order fade after taker-driven flushes, pre-registered (section 4h) |
 | `user_data/strategies/DailyTrend.py` | Freqtrade version of the section 4j long/flat trend ensemble (vol-targeted, rebalancing band) |
 | `user_data/scripts/trend_crosscheck.py` | Rebuilds DailyTrend's daily equity from backtest orders and compares it with `trend_backtest.py` |
+| `user_data/scripts/bots_launchd.sh` | Runs the BTC and SUI DailyTrend dry runs as macOS launchd jobs (one copy each, restarted after crashes and logins) |
 | `user_data/scripts/dryrun_score.py` | Scores the DailyTrend dry runs (BTC and SUI) against the four execution criteria in section 4j |
 | `user_data/scripts/trend_backtest.py` | Standalone daily trend-ensemble backtest with vol-targeting and controls, pre-registered (section 4j) |
 | `user_data/scripts/carry_backtest.py` | Standalone spot-long / perp-short funding-carry backtest, pre-registered (section 4i) |
@@ -1592,6 +1593,17 @@ funding are both caught.
 ```bash
 python user_data/scripts/dryrun_score.py
 ```
+
+#### Keeping the dry runs alive (macOS)
+
+On 2026-11-04 both Terminal-started bots stopped at about 10:14 local time when
+Terminal was restored after a restart, and a later restart briefly produced a second
+BTC bot. `user_data/scripts/bots_launchd.sh install` replaces the Terminal windows
+with two launchd jobs (`com.freqtrade.dailytrend.btc` / `.sui`): exactly one copy of
+each, started at login, restarted within 60 s if it exits, wrapped in `caffeinate -i`,
+logging to `user_data/logs/dailytrend_<bot>.log`. `status`, `restart` and
+`uninstall` are the other commands. Jobs run only while the user is logged in, so
+automatic login should be on for unattended restarts.
 
 ## 5. Comparing variants in one go
 
