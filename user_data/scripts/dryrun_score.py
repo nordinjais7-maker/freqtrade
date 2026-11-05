@@ -292,7 +292,8 @@ def report(db: Path, pair: str, wallet: float, fee: float, since: str | None = N
         f"  running since {start:%Y-%m-%d %H:%M} UTC; {len(trades)} trade(s), {len(orders)} fill(s)"
     )
     print(
-        f"  model target at last close ({last.index[-1].date()}): {last.iloc[-1]:.2f}x equity; "
+        f"  model target at last close ({(last.index[-1] + pd.Timedelta(days=1)):%Y-%m-%d %H:%M} UTC): "
+        f"{last.iloc[-1]:.2f}x equity; "
         f"bot position now: {open_units:g} {symbol[:-4]}"
     )
     for name, ok, detail in score(trades, orders, daily, funding, start, wallet, fee):
